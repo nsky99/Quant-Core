@@ -155,6 +155,62 @@ class SimpleSMAStrategy(Strategy):
         self.params = params if params is not None else {}
         super().__init__(name, symbols, timeframe, engine)
 
+    async def on_order_update(self, order_data: dict):
+        """
+        处理订单状态更新。
+        """
+        await super().on_order_update(order_data) # 调用基类的方法（如果它有实现）
+
+        # 详细打印订单信息
+        order_id = order_data.get('id')
+        status = order_data.get('status')
+        symbol = order_data.get('symbol')
+        filled = order_data.get('filled', 0)
+        amount = order_data.get('amount', 0)
+        price = order_data.get('price', 0)
+        avg_price = order_data.get('average', 0)
+
+        timestamp_ms = order_data.get('timestamp')
+        timestamp_dt_str = pd.to_datetime(timestamp_ms, unit='ms').strftime('%Y-%m-%d %H:%M:%S') if timestamp_ms else "N/A"
+
+        print(f"策略 [{self.name}] ({symbol}): 订单更新 @ {timestamp_dt_str}")
+        print(f"  ID: {order_id}, Status: {status}")
+        print(f"  Filled: {filled}/{amount} @ Price: {price} (Avg: {avg_price})")
+        if order_data.get('remaining') is not None:
+             print(f"  Remaining: {order_data['remaining']}")
+        if order_data.get('fee') and order_data['fee'].get('cost') is not None:
+            print(f"  Fee: {order_data['fee']['cost']} {order_data['fee']['currency']}")
+
+
+    async def on_fill(self, fill_data: dict):
+        """
+        处理订单成交事件。
+        SimpleSMAStrategy 将使用基类的默认持仓更新逻辑。
+        """
+        print(f"策略 [{self.name}]: === 订单成交 (on_fill) ===")
+        # 打印一些关键的成交信息
+        order_id = fill_data.get('id')
+        symbol = fill_data.get('symbol')
+        status = fill_data.get('status') # 应该是 'closed'
+        filled_amount = fill_data.get('filled', 0)
+        average_price = fill_data.get('average', 0)
+        side = fill_data.get('side')
+        timestamp_ms = fill_data.get('timestamp')
+        timestamp_dt_str = pd.to_datetime(timestamp_ms, unit='ms').strftime('%Y-%m-%d %H:%M:%S') if timestamp_ms else "N/A"
+
+        print(f"  时间: {timestamp_dt_str}, 订单ID: {order_id}")
+        print(f"  交易对: {symbol}, 方向: {side}, 状态: {status}")
+        print(f"  成交数量: {filled_amount}, 平均价格: {average_price}")
+
+        # 调用基类的 on_fill 来处理持仓更新
+        await super().on_fill(fill_data)
+
+        # 在这里可以添加策略特定的成交后逻辑，例如：
+        # - 记录成交
+        # - 如果是部分成交，判断是否需要取消剩余部分或等待
+        # - 调整后续下单逻辑的参数等
+        print(f"策略 [{self.name}]: 当前 {symbol} 持仓: {self.get_position(symbol)}")
+
 
 if __name__ == '__main__':
     # 简单演示策略逻辑 (不通过引擎)

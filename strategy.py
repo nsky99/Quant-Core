@@ -173,37 +173,76 @@ class Strategy(ABC):
         self.position[symbol] = current_amount + amount_change
         print(f"策略 [{self.name}]：持仓更新 {symbol}: {self.position[symbol]} (变化: {amount_change})")
 
-
-    # --- 可选的回调方法 ---
-    def on_tick(self, symbol: str, tick_data):
+    # --- 回调方法 (由引擎调用) ---
+    async def on_tick(self, symbol: str, tick_data: dict):
         """
         (可选) 当新的tick数据到达时调用。
+        :param symbol: 交易对。
+        :param tick_data: Tick数据字典 (ccxt Ticker结构)。
         """
         pass
 
-    def on_order_update(self, order_update):
+    async def on_order_update(self, order_data: dict):
         """
-        (可选) 当订单状态更新时调用。
-        例如，订单被部分成交、完全成交、取消等。
+        当与此策略相关的订单状态更新时调用。
+        :param order_data: 订单数据字典 (ccxt Order结构)。
         """
-        # print(f"策略 [{self.name}]：接收到订单更新: {order_update}")
-        # if order_update.get('status') == 'closed' and order_update.get('filled', 0) > 0:
-        #     self.on_fill(order_update)
+        # 默认实现：打印基本信息。子类可以覆盖以实现更复杂的逻辑。
+        # print(f"策略 [{self.name}]：收到订单更新 -> ID: {order_data.get('id')}, Status: {order_data.get('status')}, Filled: {order_data.get('filled')}")
         pass
 
-    def on_fill(self, fill_event):
+    async def on_fill(self, fill_data: dict):
         """
-        (可选) 当订单成交时调用。
-        fill_event 通常是包含成交详情的订单对象或特定成交事件对象。
+        当与此策略相关的订单发生实际成交时调用。
+        对于一个订单，此方法可能被多次调用（如果订单是部分成交）。
+        引擎在检测到订单有新成交时（通常是订单状态变为'closed'且'filled'>0，或者通过检查'trades'字段）会调用此方法。
+        为简化，引擎当前在订单'closed'且'filled'>0时，将整个订单对象作为fill_data传递。
+        更精细的实现可能需要引擎解析 `order_data['trades']` 并为每个trade调用此方法。
+
+        :param fill_data: 通常是已关闭且有成交的订单对象 (ccxt Order结构)。
+                          或者在更精细的实现中，是单个成交记录 (ccxt Trade结构)。
         """
-        # print(f"策略 [{self.name}]：订单成交: {fill_event}")
-        # symbol = fill_event['symbol']
-        # filled_amount = fill_event['filled']
-        # side = fill_event['side']
-        #
-        # amount_change = filled_amount if side == 'buy' else -filled_amount
-        # self.update_position(symbol, amount_change)
+        # 默认实现：尝试更新持仓。
+        # print(f"策略 [{self.name}]：收到成交事件 (on_fill) -> OrderID: {fill_data.get('id')}, Filled: {fill_data.get('filled')}")
+
+        symbol = fill_data.get('symbol')
+        filled_amount = fill_data.get('filled') # 总成交量
+        side = fill_data.get('side')
+        average_price = fill_data.get('average') # 平均成交价
+
+        if symbol and side and filled_amount is not None and filled_amount > 0:
+            # 注意：如果一个订单之前有部分成交，然后又部分成交直到完全成交，
+            # 这里的 filled_amount 是该订单的总成交量。
+            # 我们需要一种方法来只处理“新的”成交量。
+            # 一个简单的方法是比较当前策略已记录的该订单的成交量与新的成交量。
+            # 或者，策略应该基于单个trade事件来更新持仓，而不是基于整个订单关闭事件。
+            # 为简单起见，这里的默认实现假设 on_fill 被调用时，fill_data['filled'] 代表了需要更新的总量，
+            # 或者策略需要自己管理如何增量更新。
+
+            # 更准确的持仓更新应该基于单个trade。
+            # 如果 fill_data 包含 'trades' 列表且非空，则那是更精确的成交信息来源。
+            # 此处简化处理：假设 'filled' 是这次事件需要处理的量（如果引擎只在订单最终关闭时推送一次）。
+
+            amount_change = filled_amount if side == 'buy' else -filled_amount
+            # 传递成交均价给 update_position (虽然简单实现可能不用)
+            self.update_position(symbol, amount_change, price=average_price)
+        else:
+            print(f"策略 [{self.name}] on_fill: 数据不足以更新持仓 ({symbol}, {side}, {filled_amount})")
         pass
+
+    def update_position(self, symbol: str, amount_change: float, price: float = 0.0): # 添加price参数
+        """
+        更新持仓。当订单成交时，引擎应该调用此方法（或策略的on_fill调用此方法）。
+        正数为增加持仓，负数为减少持仓。
+        :param price: 可选的成交价格，用于更复杂的持仓成本计算。
+        """
+        current_amount = self.position.get(symbol, 0.0)
+        new_amount = current_amount + amount_change
+        self.position[symbol] = new_amount
+
+        # 简单的日志，可以扩展为包括平均成本等
+        print(f"策略 [{self.name}]：持仓更新 -> {symbol}: 从 {current_amount:.8f} 到 {new_amount:.8f} (变化: {amount_change:.8f}) at price approx {price:.2f}")
+
 
 if __name__ == '__main__':
     # 这是一个抽象类，不能直接实例化。
