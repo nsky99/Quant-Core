@@ -58,8 +58,11 @@ class SimpleSMAStrategy(Strategy):
         处理新的K线数据。
         """
         close_price = bar['close']
-        timestamp = pd.to_datetime(bar['timestamp'], unit='ms')
-        # print(f"策略 [{self.name}] ({symbol}): 收到K线, 收盘价: {close_price} at {timestamp}")
+        timestamp_ms = bar['timestamp'] # 保持毫秒级时间戳进行比较
+        timestamp_dt = pd.to_datetime(timestamp_ms, unit='ms') # 用于打印的可读时间
+
+        # 更详细的日志，显示K线来源（帮助区分轮询和可能的未来WebSocket）
+        # print(f"策略 [{self.name}] ({symbol}): 收到K线 (来源: Engine), 收盘价: {close_price} at {timestamp_dt.strftime('%Y-%m-%d %H:%M:%S')}")
 
         # 初始化该交易对的数据存储
         if symbol not in self.close_prices:
@@ -97,16 +100,16 @@ class SimpleSMAStrategy(Strategy):
         current_short_sma = short_sma
         current_long_sma = long_sma
 
-        # print(f"策略 [{self.name}] ({symbol}): ShortSMA={current_short_sma:.2f}, LongSMA={current_long_sma:.2f} at {timestamp}")
+        # print(f"策略 [{self.name}] ({symbol}): ShortSMA={current_short_sma:.2f}, LongSMA={current_long_sma:.2f} at {timestamp_dt.strftime('%Y-%m-%d %H:%M:%S')}")
 
         # 买入信号：短期SMA从下方上穿长期SMA
         if prev_short_sma is not None and prev_long_sma is not None: # 确保前一个值也有效
             if prev_short_sma <= prev_long_sma and current_short_sma > current_long_sma:
-                print(f"策略 [{self.name}] ({symbol}): === 买入信号 (金叉) ===")
-                print(f"  时间: {timestamp}")
+                print(f"策略 [{self.name}] ({symbol}): === 买入信号 (金叉) @ {timestamp_dt.strftime('%Y-%m-%d %H:%M:%S')} ===")
+                # print(f"  时间: {timestamp_dt.strftime('%Y-%m-%d %H:%M:%S')}") # 重复了
                 print(f"  当前价格: {close_price}")
-                print(f"  Short SMA ({self.short_sma_period}): {current_short_sma:.2f} (前: {prev_short_sma:.2f})")
-                print(f"  Long SMA ({self.long_sma_period}): {current_long_sma:.2f} (前: {prev_long_sma:.2f})")
+                print(f"  Short SMA ({self.short_sma_period}): {current_short_sma:.2f} (前值: {prev_short_sma:.2f})")
+                print(f"  Long SMA ({self.long_sma_period}): {current_long_sma:.2f} (前值: {prev_long_sma:.2f})")
 
                 # 模拟下单 (实际交易需要取消注释并确保引擎和执行器配置正确)
                 # try:
@@ -123,11 +126,11 @@ class SimpleSMAStrategy(Strategy):
 
             # 卖出信号：短期SMA从上方下穿长期SMA
             elif prev_short_sma >= prev_long_sma and current_short_sma < current_long_sma:
-                print(f"策略 [{self.name}] ({symbol}): === 卖出信号 (死叉) ===")
-                print(f"  时间: {timestamp}")
+                print(f"策略 [{self.name}] ({symbol}): === 卖出信号 (死叉) @ {timestamp_dt.strftime('%Y-%m-%d %H:%M:%S')} ===")
+                # print(f"  时间: {timestamp_dt.strftime('%Y-%m-%d %H:%M:%S')}")
                 print(f"  当前价格: {close_price}")
-                print(f"  Short SMA ({self.short_sma_period}): {current_short_sma:.2f} (前: {prev_short_sma:.2f})")
-                print(f"  Long SMA ({self.long_sma_period}): {current_long_sma:.2f} (前: {prev_long_sma:.2f})")
+                print(f"  Short SMA ({self.short_sma_period}): {current_short_sma:.2f} (前值: {prev_short_sma:.2f})")
+                print(f"  Long SMA ({self.long_sma_period}): {current_long_sma:.2f} (前值: {prev_long_sma:.2f})")
 
                 # 模拟下单
                 # try:

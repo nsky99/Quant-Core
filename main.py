@@ -116,14 +116,14 @@ async def demonstrate_strategy_engine(exchange_id='binance'):
         order_executor = OrderExecutor(exchange_id=exchange_id, sandbox_mode=True)
 
         # 2. 初始化策略引擎
-        engine_poll_interval = 15
-        engine_run_duration = 60
+        # engine_poll_interval = 15 # 不再需要，引擎使用WebSocket
+        # engine_run_duration = 60  # 引擎将持续运行，直到手动中断
 
         engine = StrategyEngine(
             data_fetcher=data_fetcher,
             account_manager=account_manager,
-            order_executor=order_executor,
-            poll_interval_seconds=engine_poll_interval
+            order_executor=order_executor
+            # poll_interval_seconds 参数已从 StrategyEngine 移除
         )
 
         # 3. 创建并添加策略实例
@@ -142,16 +142,24 @@ async def demonstrate_strategy_engine(exchange_id='binance'):
         engine.add_strategy(sma_strategy)
 
         # 4. 启动引擎
-        print(f"\n准备启动策略引擎，将运行约 {engine_run_duration} 秒...")
+        print(f"\n准备启动策略引擎 (WebSocket模式)...")
         print(f"策略将监控 {sma_strategy.symbols} @ {sma_strategy.timeframe}。")
-        print(f"轮询间隔: {engine_poll_interval} 秒。")
+        print(f"引擎将通过 WebSocket (如果交易所支持 watch_ohlcv) 接收实时K线。")
         await engine.start()
 
-        print(f"\n策略引擎已启动。等待 {engine_run_duration} 秒... 按 Ctrl+C 可提前中断。")
-        await asyncio.sleep(engine_run_duration)
+        print(f"\n策略引擎已启动。它将持续运行并监听实时数据。")
+        print("按 Ctrl+C 停止引擎和程序。")
+        # 保持主任务运行，直到被中断或引擎内部所有流任务结束
+        # 简单的方式是长时间 sleep，或者更复杂地监控引擎状态
+        while engine._running: # engine._running 状态可能需要更精细的管理以允许外部优雅停止
+            if engine._data_stream_tasks and all(task.done() for task in engine._data_stream_tasks if task):
+                print("引擎：所有数据流任务已结束，但引擎仍在运行状态。可能是所有流都因错误停止。")
+                print("演示将在此处停止。在实际应用中，可能需要重启逻辑。")
+                break # 退出循环，进入 finally 块
+            await asyncio.sleep(1) # 每秒检查一次状态
 
     except KeyboardInterrupt:
-        print("\n用户请求中断策略引擎运行。")
+        print("\n用户请求中断策略引擎运行 (Ctrl+C)。")
     except Exception as e:
         print(f"策略引擎演示过程中发生严重错误: {e}")
         import traceback
