@@ -2,7 +2,7 @@
 
 ## 项目目标
 
-本项目旨在提供一个基于 Python 和 `ccxtpro` 库的模块化加密货币量化交易框架基础。它包括数据获取、账户管理和订单执行等核心功能。
+本项目旨在提供一个基于 Python 和 `ccxtpro` 库的模块化加密货币量化交易框架基础。它包括数据获取、账户管理、订单执行以及一个初步的策略引擎。
 
 ## 当前模块
 
@@ -14,25 +14,39 @@
 2.  **`account_manager.py`**:
     *   包含 `AccountManager` 类。
     *   功能：管理交易所账户信息，主要是获取账户余额。
-    *   **重要**: 此模块需要用户提供有效的 API Key 和 Secret。这些凭证可以通过构造函数参数传递，或通过设置环境变量 (例如 `BINANCE_API_KEY`, `BINANCE_SECRET_KEY`) 来配置。
+    *   **重要**: 此模块需要用户提供有效的 API Key 和 Secret。
 
 3.  **`order_executor.py`**:
     *   包含 `OrderExecutor` 类。
     *   功能：执行交易操作，如创建限价买/卖单、取消订单。
-    *   **重要**: 此模块需要用户提供有效的 API Key 和 Secret，并且这些密钥必须具有交易权限。
-    *   **风险警告**: 直接与交易所API交互进行交易具有真实资金风险。强烈建议：
-        *   在真实的交易环境中使用前，务必在交易所提供的**测试网 (Sandbox)** 环境中进行充分测试。
-        *   `OrderExecutor` 的构造函数包含 `sandbox_mode=True` 参数，尝试为支持的交易所启用测试网。
-        *   始终从小额资金开始测试。
+    *   **重要**: 此模块需要 API Key 和 Secret，并具有交易权限。
+    *   **风险警告**: 真实交易有风险，强烈建议使用**测试网 (Sandbox)**。
 
-4.  **`main.py`**:
-    *   作为演示上述模块功能的入口脚本。
-    *   它会展示如何初始化和使用 `DataFetcher`, `AccountManager`, 和 `OrderExecutor`。
+4.  **`strategy.py`**:
+    *   包含 `Strategy` 抽象基类。
+    *   功能：定义了策略应遵循的接口，包括生命周期方法 (`on_init`, `on_start`, `on_stop`, `on_bar`) 和交易辅助方法 (`buy`, `sell`, `cancel_order`)。
+    *   所有自定义策略应从此类继承。
+
+5.  **`strategy_engine.py`**:
+    *   包含 `StrategyEngine` 类。
+    *   功能：负责管理和运行一个或多个策略实例。它从 `DataFetcher` 获取数据，将数据分发给相应的策略，并提供接口供策略通过 `OrderExecutor` 执行交易。
+    *   当前实现是基于K线轮询的。
+
+6.  **`strategies/` (目录)**:
+    *   用于存放用户自定义的具体策略实现。
+    *   **`strategies/simple_sma_strategy.py`**: 一个示例策略，演示了如何基于 `Strategy` 基类实现一个简单的移动平均线交叉策略。
+
+7.  **`main.py`**:
+    *   作为演示框架所有核心模块功能的入口脚本。
+    *   它会展示如何初始化和使用 `DataFetcher`, `AccountManager`, `OrderExecutor`, 以及如何设置和运行 `StrategyEngine` 与示例策略。
     *   对于需要 API 凭证的模块，它会进行提示。
 
 ## 依赖
 
 *   `ccxtpro`: 用于连接各大加密货币交易所的库。
+*   `ccxt`: `ccxtpro` 的基础库。
+*   `pandas`: 用于数据处理，尤其是在策略和K线数据处理中。
+*   `numpy`: 用于数值计算，例如在示例策略中计算SMA。
 *   依赖项在 `requirements.txt` 文件中列出。
 
 ## 如何配置和运行
@@ -43,7 +57,7 @@
     ```
 
 2.  **配置 API 凭证 (可选，但对于账户管理和交易执行是必需的)**:
-    *   为了使用 `AccountManager` 获取余额或使用 `OrderExecutor` 进行交易，你需要从你的交易所获取 API Key 和 Secret。
+    *   为了使用 `AccountManager` 获取余额或使用 `OrderExecutor` 进行交易（包括由策略发起的交易），你需要从你的交易所获取 API Key 和 Secret。
     *   **推荐方式**: 设置环境变量。例如，对于 Binance:
         ```bash
         export BINANCE_API_KEY="your_api_key_here"
@@ -53,40 +67,48 @@
         ```bash
         export OKX_PASSWORD="your_api_password_here"
         ```
-    *   或者，你可以在实例化 `AccountManager` 或 `OrderExecutor` 时通过构造函数参数 `api_key`, `secret_key`, `password` 传递凭证 (不推荐硬编码在脚本中)。
+    *   或者，你可以在实例化 `AccountManager` 或 `OrderExecutor` 时通过构造函数参数传递凭证。
 
 3.  **运行演示**:
-    *   主演示脚本是 `main.py`:
+    *   主演示脚本是 `main.py`。它现在也包含了策略引擎的演示部分，会尝试运行 `SimpleSMAStrategy`:
         ```bash
         python main.py
         ```
-    *   各个模块文件 (`data_fetcher.py`, `account_manager.py`, `order_executor.py`) 也包含它们自己的 `if __name__ == '__main__':` 块，可以单独运行以测试特定模块的功能。例如：
-        ```bash
-        python data_fetcher.py
-        # 要运行 account_manager.py 或 order_executor.py 的示例并使其执行API调用，
-        # 你需要先设置相应的环境变量。
-        # 例如 (对于 Binance 测试网):
-        # export BINANCE_API_KEY="your_sandbox_api_key"
-        # export BINANCE_SECRET_KEY="your_sandbox_secret_key"
-        # python order_executor.py
-        ```
+        注意：策略引擎演示默认会尝试从交易所获取实时数据。如果运行环境的网络受限（例如某些云IDE），`DataFetcher` 可能无法连接到交易所，导致策略收不到数据。
+    *   各个模块文件 (`data_fetcher.py`, `account_manager.py`, `order_executor.py`, `strategy_engine.py`, `strategies/simple_sma_strategy.py`) 也包含它们自己的 `if __name__ == '__main__':` 块，可以单独运行以测试特定模块或策略的逻辑。
+
+## 创建和运行自己的策略
+
+1.  在 `strategies/` 目录下创建一个新的 Python 文件（例如 `my_awesome_strategy.py`）。
+2.  在该文件中，创建一个继承自 `strategy.Strategy` 的类。
+3.  实现必要的方法，特别是 `on_init()` (用于设置参数和指标) 和 `async def on_bar(self, symbol, bar)` (用于定义策略的核心逻辑)。
+4.  在 `main.py` 的 `demonstrate_strategy_engine` 函数中（或创建一个新的演示函数）：
+    *   导入你的新策略类。
+    *   实例化你的策略（可以传入自定义参数）。
+    *   将策略实例添加到 `StrategyEngine` 中。
+    *   启动引擎。
 
 ## 注意事项
 
-*   **异步编程**: `ccxtpro` 主要使用异步操作 (`async/await`)。因此，框架中的核心方法也是异步的，需要在一个事件循环中运行 (例如使用 `asyncio.run()`)。
-*   **错误处理**: 每个模块都包含基本的错误处理，但可以根据具体需求进一步完善。
-*   **交易所兼容性**: 虽然 `ccxtpro` 支持大量交易所，但不同交易所的 API 行为、交易对符号、费率、最小订单量等可能存在差异。在使用新的交易所时，请务必查阅其文档和 `ccxtpro` 的相关说明。
-*   **安全性**: 永远不要将你的 API Key 和 Secret 硬编码到代码库中或提交到版本控制系统。使用环境变量或安全的配置文件管理方式。
+*   **异步编程**: 框架大量使用 `async/await`。
+*   **错误处理**: 当前错误处理较为基础，生产使用需要增强。
+*   **交易所兼容性**: 不同交易所API特性可能不同。
+*   **安全性**: 严格管理API密钥。
 
 ## 后续开发建议
 
-*   **策略引擎**: 实现一个可以加载和执行用户定义交易策略的模块。
-*   **风险管理**: 添加更复杂的风险控制逻辑，如仓位管理、止盈止损、最大回撤控制等。
-*   **事件驱动核心**: 构建一个事件驱动的引擎，用于处理实时市场数据更新、订单状态变化等，以触发策略执行。
-*   **数据存储**: 集成数据库或文件存储，用于保存历史数据、交易记录、策略状态等。
-*   **回测框架**: 开发或集成一个回测系统，用于在历史数据上测试交易策略。
-*   **日志与通知**: 实现更完善的日志系统和通知机制 (如邮件、Telegram)。
-*   **用户界面**: （可选）开发一个简单的 Web UI 或命令行界面进行交互。
+*   **完善策略引擎**:
+    *   集成实时 WebSocket 数据流 (而非仅轮询) 以获得更低延迟的事件。
+    *   支持更多事件类型，如订单簿更新 (`on_orderbook_update`)、实时成交回报 (`on_fill`, `on_order_update`) 的精确推送。
+    *   实现更复杂的策略间数据共享或通信机制。
+*   **风险管理**: 实现独立的风险管理模块，对订单大小、总风险暴露、止盈止损等进行控制。策略在下单前应通过风险管理器检查。
+*   **增强事件驱动核心**: 优化事件处理和分发机制。
+*   **数据存储与回测**:
+    *   集成数据存储方案 (如数据库、文件) 来保存历史行情数据、交易记录、策略状态等。
+    *   开发或集成一个回测框架，允许在历史数据上测试策略的性能。
+*   **日志与通知**: 实现更结构化和可配置的日志系统，以及通过邮件、Telegram等方式发送重要事件通知。
+*   **配置管理**: 使用更灵活的配置文件 (如 YAML, JSON) 来管理策略参数、引擎设置等，而不是硬编码。
+*   **用户界面**: （可选）开发一个简单的 Web UI 或命令行界面进行监控和交互。
 
 ---
 

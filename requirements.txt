@@ -1,2 +1,4 @@
 ccxt
 ccxtpro
+pandas
+numpy

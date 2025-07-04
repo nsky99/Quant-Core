@@ -1,9 +1,12 @@
 import asyncio
 import os
+import pandas as pd # 策略引擎演示中可能会用到
 
 from data_fetcher import DataFetcher
 from account_manager import AccountManager
 from order_executor import OrderExecutor
+from strategy_engine import StrategyEngine
+from strategies.simple_sma_strategy import SimpleSMAStrategy # 确保路径正确
 
 async def demonstrate_data_fetcher(exchange_id='binance'):
     print(f"\n--- 演示 DataFetcher (交易所: {exchange_id}) ---")
@@ -12,13 +15,9 @@ async def demonstrate_data_fetcher(exchange_id='binance'):
         fetcher = DataFetcher(exchange_id=exchange_id)
         print(f"已连接到 {fetcher.exchange.id}")
 
-        # 获取 K 线数据
-        symbol = 'BTC/USDT' # 常用的交易对
-        # 尝试找到一个在大多数交易所都存在的交易对
-        if exchange_id == 'coinbasepro': # Coinbase Pro 使用 'BTC-USD' 格式
-            symbol = 'BTC-USD'
-        elif exchange_id == 'kraken':
-            symbol = 'XBT/USD' # Kraken 对 BTC 使用 XBT
+        symbol = 'BTC/USDT'
+        if exchange_id == 'coinbasepro': symbol = 'BTC-USD'
+        elif exchange_id == 'kraken': symbol = 'XBT/USD'
 
         print(f"\n获取 {symbol} 的1分钟K线 (最近3条)...")
         ohlcv = await fetcher.get_ohlcv(symbol, timeframe='1m', limit=3)
@@ -40,15 +39,13 @@ async def demonstrate_data_fetcher(exchange_id='binance'):
 async def demonstrate_account_manager(exchange_id='binance'):
     print(f"\n--- 演示 AccountManager (交易所: {exchange_id}) ---")
     print("注意: 获取账户余额需要配置 API Key 和 Secret。")
-    print(f"请确保已设置环境变量 (例如 {exchange_id.upper()}_API_KEY, {exchange_id.upper()}_SECRET_KEY) 或在代码中提供。")
 
     manager = None
     try:
-        # 初始化 AccountManager, 它会尝试从环境变量加载凭证
         manager = AccountManager(exchange_id=exchange_id)
         print(f"AccountManager 初始化完毕 (交易所: {manager.exchange.id})")
 
-        if manager.exchange.apiKey: # 检查凭证是否已加载
+        if manager.exchange.apiKey:
             print("\n尝试获取账户余额...")
             balance = await manager.get_balance()
             if balance:
@@ -59,8 +56,7 @@ async def demonstrate_account_manager(exchange_id='binance'):
             else:
                 print("未能获取账户余额。请检查API Key权限或网络连接。")
         else:
-            print("API Key 未配置或加载失败，跳过获取余额。")
-            print("AccountManager 仍然可以实例化，但依赖API Key的功能将不可用。")
+            print(f"API Key ({exchange_id.upper()}_API_KEY) 未配置或加载失败，跳过获取余额。")
 
     except ValueError as ve:
         print(f"AccountManager 值错误: {ve}")
@@ -75,14 +71,9 @@ async def demonstrate_account_manager(exchange_id='binance'):
 async def demonstrate_order_executor(exchange_id='binance'):
     print(f"\n--- 演示 OrderExecutor (交易所: {exchange_id}) ---")
     print("警告: 订单执行功能直接与交易所交互。")
-    print("真实交易有风险，强烈建议使用测试网/沙箱 API 凭证进行测试。")
-    print(f"请确保已设置环境变量或在代码中提供凭证，并考虑启用 sandbox_mode=True。")
 
     executor = None
     try:
-        # 初始化 OrderExecutor, 尝试从环境变量加载凭证，并尝试启用沙箱模式
-        # 如果您的交易所测试网有特定名称，可能需要调整 exchange_id
-        # 例如，对于 Binance 测试网，exchange_id 仍是 'binance', 但 sandbox_mode=True
         executor = OrderExecutor(exchange_id=exchange_id, sandbox_mode=True)
         print(f"OrderExecutor 初始化完毕 (交易所: {executor.exchange.id})")
 
@@ -93,26 +84,10 @@ async def demonstrate_order_executor(exchange_id='binance'):
         else:
             print("OrderExecutor 未明确连接到测试网或沙箱。请谨慎操作！")
 
-
         if executor.exchange.apiKey:
-            print("API Key 已加载。可以尝试模拟下单 (这里不实际执行，仅作演示结构)。")
-            # 实际调用示例 (确保有足够的测试资金和正确的参数):
-            # symbol_to_trade = 'BTC/USDT' # 根据交易所和测试环境调整
-            # if exchange_id == 'coinbasepro': symbol_to_trade = 'BTC-USD'
-            # elif exchange_id == 'kraken': symbol_to_trade = 'XBT/USD'
-            #
-            # print(f"\n模拟创建限价买单 (不会实际执行)...")
-            # print(f"  参数: {symbol_to_trade}, amount=0.001, price=20000")
-            # # order = await executor.create_limit_buy_order(symbol_to_trade, 0.001, 20000)
-            # # if order:
-            # #     print(f"  模拟订单创建成功: {order.get('id')}")
-            # #     await executor.cancel_order(order['id'], symbol_to_trade)
-            # # else:
-            # #     print("  模拟订单创建失败。")
-            print("要实际测试下单，请参考 order_executor.py 中的 main_example。")
+            print("API Key 已加载。模拟下单功能请参考 order_executor.py 中的示例。")
         else:
-            print("API Key 未配置或加载失败，跳过订单执行演示。")
-            print("OrderExecutor 仍然可以实例化，但交易功能将不可用。")
+            print(f"API Key ({exchange_id.upper()}_API_KEY) 未配置或加载失败，跳过订单执行演示。")
 
     except ValueError as ve:
         print(f"OrderExecutor 值错误: {ve}")
@@ -123,48 +98,117 @@ async def demonstrate_order_executor(exchange_id='binance'):
             await executor.close()
             print(f"OrderExecutor ({exchange_id}) 连接已关闭。")
 
+async def demonstrate_strategy_engine(exchange_id='binance'):
+    print(f"--- 开始策略引擎演示 (交易所: {exchange_id}) ---")
+    print("此演示将使用配置的 DataFetcher，但 AccountManager 和 OrderExecutor")
+    print("将使用默认初始化 (可能没有API Key，因此实际交易功能受限)。")
+    print("SimpleSMAStrategy 将主要打印信号，而不是实际执行交易，除非API Key已配置且策略中取消下单注释。")
+
+    data_fetcher = None
+    account_manager = None
+    order_executor = None
+    engine = None
+
+    try:
+        # 1. 初始化组件
+        data_fetcher = DataFetcher(exchange_id=exchange_id)
+        account_manager = AccountManager(exchange_id=exchange_id)
+        order_executor = OrderExecutor(exchange_id=exchange_id, sandbox_mode=True)
+
+        # 2. 初始化策略引擎
+        engine_poll_interval = 15
+        engine_run_duration = 60
+
+        engine = StrategyEngine(
+            data_fetcher=data_fetcher,
+            account_manager=account_manager,
+            order_executor=order_executor,
+            poll_interval_seconds=engine_poll_interval
+        )
+
+        # 3. 创建并添加策略实例
+        sma_params = {'short_sma_period': 5, 'long_sma_period': 10}
+
+        strategy_symbol = 'BTC/USDT'
+        if exchange_id == 'coinbasepro': strategy_symbol = 'BTC-USD'
+        elif exchange_id == 'kraken': strategy_symbol = 'XBT/USD'
+
+        sma_strategy = SimpleSMAStrategy(
+            name="DemoSMA_BTC",
+            symbols=[strategy_symbol],
+            timeframe="1m",
+            params=sma_params
+        )
+        engine.add_strategy(sma_strategy)
+
+        # 4. 启动引擎
+        print(f"\n准备启动策略引擎，将运行约 {engine_run_duration} 秒...")
+        print(f"策略将监控 {sma_strategy.symbols} @ {sma_strategy.timeframe}。")
+        print(f"轮询间隔: {engine_poll_interval} 秒。")
+        await engine.start()
+
+        print(f"\n策略引擎已启动。等待 {engine_run_duration} 秒... 按 Ctrl+C 可提前中断。")
+        await asyncio.sleep(engine_run_duration)
+
+    except KeyboardInterrupt:
+        print("\n用户请求中断策略引擎运行。")
+    except Exception as e:
+        print(f"策略引擎演示过程中发生严重错误: {e}")
+        import traceback
+        traceback.print_exc()
+    finally:
+        # 5. 停止引擎和关闭组件
+        print("\n正在停止策略引擎和关闭组件...")
+        if engine and engine._running:
+            await engine.stop()
+
+        if data_fetcher: await data_fetcher.close()
+        if account_manager: await account_manager.close()
+        if order_executor: await order_executor.close()
+
+        print("--- 策略引擎演示结束 ---")
+
 
 async def main():
-    print("加密货币量化交易框架 - 基础功能演示")
+    print("加密货币量化交易框架 - 功能演示")
     print("========================================")
 
-    # 选择一个交易所进行演示，可以更改为其他 ccxtpro 支持的交易所
-    # 例如: 'binance', 'coinbasepro', 'kraken', 'kucoin', 'okx'
-    # 注意：不同交易所的交易对符号、API密钥要求可能不同
-    # 对于需要密码的交易所 (如 okx, kucoin), AccountManager 和 OrderExecutor
-    # 需要传递 password 参数或设置如 OKX_PASSWORD 环境变量
+    default_exchange = 'binance'
 
-    default_exchange = 'binance' # 大部分用户都有币安账户或熟悉其接口
-
-    # 演示 DataFetcher (通常不需要 API Key)
+    # 演示 DataFetcher
     await demonstrate_data_fetcher(exchange_id=default_exchange)
-    # 你也可以测试其他交易所的数据获取
-    # await demonstrate_data_fetcher(exchange_id='coinbasepro')
-    # await demonstrate_data_fetcher(exchange_id='kraken')
 
-    # 演示 AccountManager (需要 API Key 才能获取余额)
-    # 会提示用户配置环境变量
+    # 演示 AccountManager
     await demonstrate_account_manager(exchange_id=default_exchange)
-    # 如果你有其他交易所的key，可以测试：
-    # await demonstrate_account_manager(exchange_id='kucoin') # KuCoin 可能需要 password
 
-    # 演示 OrderExecutor (需要 API Key 才能执行交易，强烈建议沙箱)
-    # 会提示用户配置环境变量并强调风险
+    # 演示 OrderExecutor
     await demonstrate_order_executor(exchange_id=default_exchange)
 
+    # 演示策略引擎
+    print("\n--- 进入策略引擎演示部分 ---")
+    await demonstrate_strategy_engine(default_exchange)
+
     print("\n========================================")
-    print("演示完毕。")
+    print("所有演示完毕。")
     print("后续步骤可以包括：")
-    print("- 实现策略引擎")
+    print("- 完善策略引擎 (例如支持更多事件类型, WebSocket集成)")
     print("- 实现风险管理模块")
-    print("- 实现事件驱动核心")
+    # print("- 实现事件驱动核心") # 策略引擎已包含基础事件轮询
+    print("- 增强事件驱动核心和数据处理")
     print("- 完善错误处理和日志记录")
     print("- 增加更多交易所的兼容性测试和特定处理")
 
 if __name__ == '__main__':
+    restricted_env = os.getenv("RUNNING_IN_RESTRICTED_SANDBOX", "false").lower() == "true"
+    if restricted_env:
+        print("提示: 检测到可能在受限环境中运行，Binance数据获取可能失败。")
+        print("策略引擎演示可能无法获取实时K线数据。")
+
     try:
         asyncio.run(main())
     except KeyboardInterrupt:
         print("\n程序被用户中断。")
     except Exception as e:
         print(f"主程序发生未捕获错误: {e}")
+        import traceback
+        traceback.print_exc()
