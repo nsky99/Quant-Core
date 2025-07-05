@@ -38,7 +38,8 @@ class DataFetcher:
 
     async def _generic_stream_loop(self, watch_method_name: str, callback: Callable,
                                    symbol: str, stream_type_key: str,
-                                   timeframe: Optional[str] = None, params: Optional[Dict] = None):
+                                   timeframe: Optional[str] = None, params: Optional[Dict] = None,
+                                   on_permanent_failure_callback: Optional[Callable] = None):
         """
         通用的WebSocket流处理循环，包含指数退避和最大重试。
         :param watch_method_name: ccxt交易所实例上的watch方法名称 (如 'watch_ohlcv', 'watch_trades')
@@ -47,6 +48,8 @@ class DataFetcher:
         :param stream_type_key: 用于日志和内部管理的流类型字符串 (e.g., 'OHLCV', 'Trades', 'Ticker').
         :param timeframe: K线周期 (仅用于OHLCV流)。
         :param params: 传递给watch方法的额外参数。
+        :param on_permanent_failure_callback: 当流永久失败时调用的回调。
+                                              签名: async def callback(symbol, stream_type_key, timeframe, error)
         """
         if params is None: params = {}
         log_prefix = f"DataFetcher ({self.exchange.id}) [{stream_type_key} {symbol}{'@'+timeframe if timeframe else ''}]:"
@@ -92,78 +95,96 @@ class DataFetcher:
 
             except ccxtpro.AuthenticationError as e:
                 print(f"{log_prefix} 认证失败: {e}. 请检查API密钥权限。永久停止此流。")
+                if on_permanent_failure_callback: await on_permanent_failure_callback(symbol, stream_type_key, timeframe, e)
                 return
             except ccxtpro.NotSupported as e:
                 print(f"{log_prefix} 操作不被支持: {e}. 永久停止此流。")
+                if on_permanent_failure_callback: await on_permanent_failure_callback(symbol, stream_type_key, timeframe, e)
                 return
             except (ccxtpro.NetworkError, ccxtpro.ExchangeNotAvailable, ccxtpro.RequestTimeout, asyncio.TimeoutError) as e:
                 current_retry_count += 1
                 print(f"{log_prefix} 网络/连接错误 (Attempt {current_retry_count}/{max_retries}): {e}. "
                       f"Retrying in {retry_delay} seconds...")
+                last_error = e
             except Exception as e:
                 current_retry_count += 1
                 print(f"{log_prefix} 未知错误 (Attempt {current_retry_count}/{max_retries}): {type(e).__name__}: {e}.")
                 # import traceback; traceback.print_exc() # DEBUG
                 print(f"  Retrying in {retry_delay} seconds...")
+                last_error = e
 
-            if current_retry_count >= max_retries: break # 跳出外层循环前先sleep
+            if current_retry_count >= max_retries: # Check if max_retries reached AFTER incrementing
+                break
 
             await asyncio.sleep(retry_delay)
             retry_delay = min(retry_delay * 2, max_retry_delay)
 
             if not hasattr(self.exchange, watch_method_name):
-                print(f"{log_prefix} Exchange object/method {watch_method_name} no longer available. Stopping stream.")
+                err = RuntimeError(f"Exchange object/method {watch_method_name} no longer available.")
+                print(f"{log_prefix} {err} Stopping stream.")
+                if on_permanent_failure_callback: await on_permanent_failure_callback(symbol, stream_type_key, timeframe, err)
                 return
 
-        print(f"{log_prefix} 达到最大重试次数 ({max_retries}). 永久停止此流。")
+        # Loop exited, meaning max_retries reached or an unrecoverable error that should have returned earlier.
+        # If loop exited due to max_retries, last_error should be set.
+        final_error = last_error if current_retry_count >= max_retries else RuntimeError(f"{log_prefix} Stream loop exited unexpectedly.")
+        print(f"{log_prefix} 达到最大重试次数 ({max_retries}) 或意外退出。永久停止此流。Error: {final_error}")
+        if on_permanent_failure_callback:
+            await on_permanent_failure_callback(symbol, stream_type_key, timeframe, final_error)
 
-    async def watch_ohlcv_stream(self, symbol: str, timeframe: str, callback: Callable, params: Optional[Dict] = None):
+    async def watch_ohlcv_stream(self, symbol: str, timeframe: str, callback: Callable,
+                                 params: Optional[Dict] = None, on_permanent_failure_callback: Optional[Callable] = None):
         if not (hasattr(self.exchange, 'watch_ohlcv') and self.exchange.has.get('watchOHLCV')):
             raise ccxtpro.NotSupported(f"DataFetcher: {self.exchange.id} 不支持 watch_ohlcv (或未声明支持)。")
 
-        # timeframe is part of the key for ohlcv
         stream_key = (symbol, timeframe, 'ohlcv')
         if stream_key in self._active_streams and not self._active_streams[stream_key].done():
             print(f"DataFetcher ({self.exchange.id}): OHLCV stream for {symbol}@{timeframe} is already running.")
             return self._active_streams[stream_key]
 
         task = asyncio.create_task(self._generic_stream_loop(
-            'watch_ohlcv', callback, symbol, 'OHLCV', timeframe=timeframe, params=params
+            'watch_ohlcv', callback, symbol, 'OHLCV',
+            timeframe=timeframe, params=params,
+            on_permanent_failure_callback=on_permanent_failure_callback
         ))
         self._active_streams[stream_key] = task
-        print(f"DataFetcher ({self.exchange.id}): OHLCV stream task created for {symbol}@{timeframe}.")
+        # print(f"DataFetcher ({self.exchange.id}): OHLCV stream task created for {symbol}@{timeframe}.") # Reduced log verbosity
         return task
 
-    async def watch_trades_stream(self, symbol: str, callback: Callable, params: Optional[Dict] = None):
+    async def watch_trades_stream(self, symbol: str, callback: Callable,
+                                  params: Optional[Dict] = None, on_permanent_failure_callback: Optional[Callable] = None):
         if not (hasattr(self.exchange, 'watch_trades') and self.exchange.has.get('watchTrades')):
             raise ccxtpro.NotSupported(f"DataFetcher: {self.exchange.id} 不支持 watch_trades (或未声明支持)。")
 
-        stream_key = (symbol, None, 'trades') # timeframe is None for trades
+        stream_key = (symbol, None, 'trades')
         if stream_key in self._active_streams and not self._active_streams[stream_key].done():
             print(f"DataFetcher ({self.exchange.id}): Trades stream for {symbol} is already running.")
             return self._active_streams[stream_key]
 
         task = asyncio.create_task(self._generic_stream_loop(
-            'watch_trades', callback, symbol, 'Trades', params=params
+            'watch_trades', callback, symbol, 'Trades', params=params,
+            on_permanent_failure_callback=on_permanent_failure_callback
         ))
         self._active_streams[stream_key] = task
-        print(f"DataFetcher ({self.exchange.id}): Trades stream task created for {symbol}.")
+        # print(f"DataFetcher ({self.exchange.id}): Trades stream task created for {symbol}.")
         return task
 
-    async def watch_ticker_stream(self, symbol: str, callback: Callable, params: Optional[Dict] = None):
+    async def watch_ticker_stream(self, symbol: str, callback: Callable,
+                                  params: Optional[Dict] = None, on_permanent_failure_callback: Optional[Callable] = None):
         if not (hasattr(self.exchange, 'watch_ticker') and self.exchange.has.get('watchTicker')):
             raise ccxtpro.NotSupported(f"DataFetcher: {self.exchange.id} 不支持 watch_ticker (或未声明支持)。")
 
-        stream_key = (symbol, None, 'ticker') # timeframe is None for ticker
+        stream_key = (symbol, None, 'ticker')
         if stream_key in self._active_streams and not self._active_streams[stream_key].done():
             print(f"DataFetcher ({self.exchange.id}): Ticker stream for {symbol} is already running.")
             return self._active_streams[stream_key]
 
         task = asyncio.create_task(self._generic_stream_loop(
-            'watch_ticker', callback, symbol, 'Ticker', params=params
+            'watch_ticker', callback, symbol, 'Ticker', params=params,
+            on_permanent_failure_callback=on_permanent_failure_callback
         ))
         self._active_streams[stream_key] = task
-        print(f"DataFetcher ({self.exchange.id}): Ticker stream task created for {symbol}.")
+        # print(f"DataFetcher ({self.exchange.id}): Ticker stream task created for {symbol}.")
         return task
 
     async def stop_stream(self, symbol: str, stream_type: str, timeframe: Optional[str] = None):
