@@ -3,3 +3,4 @@ ccxtpro
 pandas
 numpy
 PyYAML
+pydantic
