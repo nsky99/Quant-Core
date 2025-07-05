@@ -243,6 +243,18 @@ class Strategy(ABC):
         # 简单的日志，可以扩展为包括平均成本等
         print(f"策略 [{self.name}]：持仓更新 -> {symbol}: 从 {current_amount:.8f} 到 {new_amount:.8f} (变化: {amount_change:.8f}) at price approx {price:.2f}")
 
+    async def on_trade(self, symbol: str, trades_list: list):
+        """
+        (可选) 当新的逐笔成交数据到达时调用。
+        :param symbol: 交易对。
+        :param trades_list: 一个包含一个或多个成交记录的列表 (ccxt Trade结构列表)。
+                             每个成交记录是一个字典。
+        """
+        # print(f"策略 [{self.name}]：收到 {len(trades_list)} 条新成交 for {symbol}")
+        # for trade in trades_list:
+        #     print(f"  -> Trade ID: {trade.get('id')}, Side: {trade.get('side')}, Price: {trade.get('price')}, Amount: {trade.get('amount')}")
+        pass
+
 
 if __name__ == '__main__':
     # 这是一个抽象类，不能直接实例化。

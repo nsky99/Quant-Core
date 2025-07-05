@@ -47,6 +47,15 @@ class SimpleSMAStrategy(Strategy):
         print(f"  短期SMA周期: {self.short_sma_period}")
         print(f"  长期SMA周期: {self.long_sma_period}")
 
+        # Acknowledge but not necessarily use extra stream subscriptions from params
+        self.subscribe_trades = self.params.get('subscribe_trades', False)
+        self.subscribe_ticker = self.params.get('subscribe_ticker', False)
+        if self.subscribe_trades:
+            print(f"  策略 [{self.name}] 已配置为请求 Trades 数据流 (但 SimpleSMAStrategy 可能不直接使用)。")
+        if self.subscribe_ticker:
+            print(f"  策略 [{self.name}] 已配置为请求 Ticker 数据流 (但 SimpleSMAStrategy 可能不直接使用)。")
+
+
     def _calculate_sma(self, prices: list, period: int) -> float | None:
         """辅助函数：计算简单移动平均线"""
         if len(prices) < period:

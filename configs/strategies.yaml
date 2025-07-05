@@ -1,57 +1,79 @@
 # Global Risk Management Configuration
-# These parameters will be used by the BasicRiskManager instance shared by all strategies.
 risk_management:
-  # Maximum position allowed for each symbol (in base currency).
-  # If a symbol is not listed here, no position limit is enforced by this rule for it.
   max_position_per_symbol:
-    BTC/USDT: 0.05  # Example: Max 0.05 BTC
-    ETH/USDT: 0.5   # Example: Max 0.5 ETH
-    # Add other symbols and their limits as needed
-    # "ADA/USDT": 1000
-
-  # Maximum percentage of available quote currency balance to be used for a single order.
-  # e.g., 0.02 means 2% of available USDT (if quote is USDT) can be used for one order.
-  max_capital_per_order_ratio: 0.02 # Default was 0.1, reducing for more conservative example
-
-  # Minimum nominal value of an order in the quote currency (e.g., USDT).
-  # Orders with a value below this will be rejected.
-  min_order_value: 10.0 # Example: 10 USDT (Binance's typical minimum is around 10 USDT)
+    BTC/USDT: 0.05
+    ETH/USDT: 0.5
+    # For a demo strategy that might trade a different symbol, e.g., LTC/USDT
+    LTC/USDT: 1.0
+  max_capital_per_order_ratio: 0.02
+  min_order_value: 10.0
 
 # Strategy Configurations
 strategies:
-  - name: "SMABtc1m_ConfigRisk"
+  - name: "SMABtc1m_WithExtraFeeds"
     module: "strategies.simple_sma_strategy"
     class: "SimpleSMAStrategy"
-    symbols: ["BTC/USDT"]
+    symbols: ["BTC/USDT"] # This strategy will get OHLCV for BTC/USDT
     timeframe: "1m"
     params:
       short_sma_period: 10
       long_sma_period: 20
-      # Parameters for MyOrderEventStrategyInMain davranışını taklit etmek için (eğer bu stratejiyi kullanıyorsanız)
+      # New parameters to subscribe to additional feeds for symbols listed above:
+      subscribe_trades: true   # Request trades stream for BTC/USDT
+      subscribe_ticker: true   # Request ticker stream for BTC/USDT
+      # Parameters for MyOrderEventStrategyInMain behaviour (if this strategy class supports them)
       # max_orders_to_place: 1
       # order_amount: 0.0001
       # price_offset_factor: 0.90
       # trade_interval_bars: 3
 
-  - name: "SMAEth5m_ConfigRisk"
+  - name: "SMAEth5m_OHLCVOnly"
     module: "strategies.simple_sma_strategy"
     class: "SimpleSMAStrategy"
-    symbols: ["ETH/USDT"]
+    symbols: ["ETH/USDT"] # This strategy will get OHLCV for ETH/USDT
     timeframe: "5m"
     params:
       short_sma_period: 5
       long_sma_period: 12
+      # This instance does not request trades or ticker explicitly, so defaults (false) will apply.
+      # subscribe_trades: false # Explicitly false or omitted
+      # subscribe_ticker: false # Explicitly false or omitted
 
-  # You can also configure the MyOrderEventStrategyInMain (if it's adapted to be loaded this way)
-  # Make sure the module path is correct if it's defined in main.py, or move it to strategies/
-  # - name: "MainEventStrategyConfig"
-  #   module: "main" # Or "main_module_name_if_main_is_not_directly_importable_as_such"
-  #   class: "MyOrderEventStrategyInMain"
-  #   symbols: ["BTC/USDT"]
+  # Example for a strategy that might only want ticker for a specific symbol,
+  # and trades for another, but no OHLCV directly from its primary `symbols` list.
+  # This requires more advanced subscription logic in StrategyEngine or clearer param definition.
+  # For now, `subscribe_trades` and `subscribe_ticker` apply to all symbols in the `symbols` list.
+  # - name: "MultiFeedStrategy"
+  #   module: "strategies.advanced_strategy" # Hypothetical
+  #   class: "AdvancedStrategy"
+  #   symbols: ["LTC/USDT", "XRP/USDT"] # Primary symbols for OHLCV (if timeframe is set)
+  #   timeframe: "1h" # Or null/None if no OHLCV needed for primary symbols
+  #   params:
+  #     # Option 1: Simple booleans apply to all symbols in the main list
+  #     # subscribe_trades: true
+  #     # subscribe_ticker: true
+  #     # Option 2: More granular control (requires more complex parsing in engine)
+  #     # stream_subscriptions:
+  #     #   "LTC/USDT": ["ticker"]
+  #     #   "XRP/USDT": ["trades", "ticker"]
+  #     #   "BTC/USDT": ["ohlcv:1m", "ticker"] # Example for a symbol not in main list
+  #     # For simplicity, we'll stick to Option 1 for now (booleans in params).
+  #     # The engine will subscribe to these feeds for ALL symbols in the strategy's `symbols` list.
+  #     subscribe_trades_for_symbols: ["XRP/USDT"] # Example of specific symbol targeting
+  #     subscribe_ticker_for_symbols: ["LTC/USDT", "XRP/USDT"]
+
+  # If using MyConfigurableDemoStrategy from main.py (assuming main.py is importable as 'main')
+  # This strategy needs to be adapted to understand subscribe_trades/tickers from its params.
+  # - name: "MainDemoWithTrades"
+  #   module: "main"
+  #   class: "MyConfigurableDemoStrategy"
+  #   symbols: ["BTC/USDT"] # KuCoin often uses BTC-USDT for sandbox
   #   timeframe: "1m"
   #   params:
   #     max_orders_to_place: 1
-  #     order_amount: 0.0001
-  #     price_offset_factor: 0.90
-  #     trade_interval_bars: 2 # Example: trade every 2 bars
+  #     order_amount: 0.00002 # Ensure this is above minimum for the exchange (e.g. KuCoin sandbox)
+  #     price_offset_factor: 0.95 # Buy 5% below close
+  #     trade_interval_bars: 2
+  #     subscribe_trades: true
+  #     subscribe_ticker: true
 yaml
