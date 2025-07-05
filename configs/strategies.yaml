@@ -1,0 +1,47 @@
+# Example strategy configurations
+
+strategies:
+  - name: "SMABtc1m"  # Unique name for this strategy instance
+    module: "strategies.simple_sma_strategy"  # Python module path where the class is defined
+    class: "SimpleSMAStrategy"  # The class name of the strategy
+    symbols: ["BTC/USDT"]  # List of symbols this strategy instance will trade/monitor
+    timeframe: "1m"  # K-line timeframe for this instance
+    params:  # Strategy-specific parameters
+      short_sma_period: 10
+      long_sma_period: 20
+      # Example: if your strategy supports a max_orders parameter
+      # max_orders_to_place: 1
+
+  - name: "SMAEth5m_ShortPeriods"
+    module: "strategies.simple_sma_strategy"
+    class: "SimpleSMAStrategy"
+    symbols: ["ETH/USDT"]
+    timeframe: "5m"
+    params:
+      short_sma_period: 5
+      long_sma_period: 12
+      # You can add any custom parameters your strategy's __init__ or on_init can handle
+
+  # Example of a different (hypothetical) strategy configuration
+  # - name: "MomentumLtc1h"
+  #   module: "strategies.momentum_strategy" # Assuming you create this file and class
+  #   class: "MomentumStrategy"
+  #   symbols: ["LTC/USDT"]
+  #   timeframe: "1h"
+  #   params:
+  #     momentum_window: 14
+  #     threshold: 0.5
+
+  # Example for a strategy monitoring multiple symbols (if designed to do so)
+  # - name: "MultiSymbolSMA"
+  #   module: "strategies.simple_sma_strategy"
+  #   class: "SimpleSMAStrategy" # Or a specific multi-symbol strategy class
+  #   symbols: ["BTC/USDT", "ETH/USDT", "ADA/USDT"]
+  #   timeframe: "15m"
+  #   params:
+  #     short_sma_period: 9
+  #     long_sma_period: 21
+      # Note: Ensure your strategy logic (on_bar, etc.) correctly handles
+      # receiving data for multiple symbols if you configure it this way.
+      # SimpleSMAStrategy currently processes each symbol's data independently.
+yaml
