@@ -1,18 +1,39 @@
-# Example strategy configurations
+# Global Risk Management Configuration
+# These parameters will be used by the BasicRiskManager instance shared by all strategies.
+risk_management:
+  # Maximum position allowed for each symbol (in base currency).
+  # If a symbol is not listed here, no position limit is enforced by this rule for it.
+  max_position_per_symbol:
+    BTC/USDT: 0.05  # Example: Max 0.05 BTC
+    ETH/USDT: 0.5   # Example: Max 0.5 ETH
+    # Add other symbols and their limits as needed
+    # "ADA/USDT": 1000
 
+  # Maximum percentage of available quote currency balance to be used for a single order.
+  # e.g., 0.02 means 2% of available USDT (if quote is USDT) can be used for one order.
+  max_capital_per_order_ratio: 0.02 # Default was 0.1, reducing for more conservative example
+
+  # Minimum nominal value of an order in the quote currency (e.g., USDT).
+  # Orders with a value below this will be rejected.
+  min_order_value: 10.0 # Example: 10 USDT (Binance's typical minimum is around 10 USDT)
+
+# Strategy Configurations
 strategies:
-  - name: "SMABtc1m"  # Unique name for this strategy instance
-    module: "strategies.simple_sma_strategy"  # Python module path where the class is defined
-    class: "SimpleSMAStrategy"  # The class name of the strategy
-    symbols: ["BTC/USDT"]  # List of symbols this strategy instance will trade/monitor
-    timeframe: "1m"  # K-line timeframe for this instance
-    params:  # Strategy-specific parameters
+  - name: "SMABtc1m_ConfigRisk"
+    module: "strategies.simple_sma_strategy"
+    class: "SimpleSMAStrategy"
+    symbols: ["BTC/USDT"]
+    timeframe: "1m"
+    params:
       short_sma_period: 10
       long_sma_period: 20
-      # Example: if your strategy supports a max_orders parameter
+      # Parameters for MyOrderEventStrategyInMain davranışını taklit etmek için (eğer bu stratejiyi kullanıyorsanız)
       # max_orders_to_place: 1
+      # order_amount: 0.0001
+      # price_offset_factor: 0.90
+      # trade_interval_bars: 3
 
-  - name: "SMAEth5m_ShortPeriods"
+  - name: "SMAEth5m_ConfigRisk"
     module: "strategies.simple_sma_strategy"
     class: "SimpleSMAStrategy"
     symbols: ["ETH/USDT"]
@@ -20,28 +41,17 @@ strategies:
     params:
       short_sma_period: 5
       long_sma_period: 12
-      # You can add any custom parameters your strategy's __init__ or on_init can handle
 
-  # Example of a different (hypothetical) strategy configuration
-  # - name: "MomentumLtc1h"
-  #   module: "strategies.momentum_strategy" # Assuming you create this file and class
-  #   class: "MomentumStrategy"
-  #   symbols: ["LTC/USDT"]
-  #   timeframe: "1h"
+  # You can also configure the MyOrderEventStrategyInMain (if it's adapted to be loaded this way)
+  # Make sure the module path is correct if it's defined in main.py, or move it to strategies/
+  # - name: "MainEventStrategyConfig"
+  #   module: "main" # Or "main_module_name_if_main_is_not_directly_importable_as_such"
+  #   class: "MyOrderEventStrategyInMain"
+  #   symbols: ["BTC/USDT"]
+  #   timeframe: "1m"
   #   params:
-  #     momentum_window: 14
-  #     threshold: 0.5
-
-  # Example for a strategy monitoring multiple symbols (if designed to do so)
-  # - name: "MultiSymbolSMA"
-  #   module: "strategies.simple_sma_strategy"
-  #   class: "SimpleSMAStrategy" # Or a specific multi-symbol strategy class
-  #   symbols: ["BTC/USDT", "ETH/USDT", "ADA/USDT"]
-  #   timeframe: "15m"
-  #   params:
-  #     short_sma_period: 9
-  #     long_sma_period: 21
-      # Note: Ensure your strategy logic (on_bar, etc.) correctly handles
-      # receiving data for multiple symbols if you configure it this way.
-      # SimpleSMAStrategy currently processes each symbol's data independently.
+  #     max_orders_to_place: 1
+  #     order_amount: 0.0001
+  #     price_offset_factor: 0.90
+  #     trade_interval_bars: 2 # Example: trade every 2 bars
 yaml

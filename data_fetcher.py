@@ -90,35 +90,57 @@ class DataFetcher:
                 print(f"DataFetcher: 为 watch_ohlcv 加载市场时出错 ({symbol}, {timeframe}): {e}")
                 # 根据错误类型决定是否继续或抛出
 
-            while True: # Outer loop for reconnection attempts
+
+            current_retry_count = 0
+            max_retries = 5  # 最大连续重试次数
+            initial_retry_delay = 5  # 秒
+            max_retry_delay = 60 # 秒
+            retry_delay = initial_retry_delay
+
+            while current_retry_count < max_retries:
                 try:
-                    while True: # Inner loop for receiving data from an active connection
-                        # ccxtpro的 watch_ohlcv 返回的是一个列表的K线数据 [[ts, o, h, l, c, v], ...]
-                        # 通常每次只返回一条最新的K线，或者当K线关闭时返回该K线
+                    # Inner loop for receiving data from an active connection
+                    # 重置连续成功计数器或相关状态（如果需要）
+                    # print(f"DataFetcher: Attempting to connect {symbol} {timeframe} OHLCV stream (Attempt {current_retry_count + 1}/{max_retries})...")
+                    while True:
                         ohlcv_list = await self.exchange.watch_ohlcv(symbol, timeframe, params=params)
-                        if ohlcv_list: # 确保不是空列表
-                            for ohlcv_data in ohlcv_list: # 通常列表只有一个元素
-                                if ohlcv_data: # 确保ohlcv_data本身不是None
-                                    # print(f"DataFetcher DEBUG: Raw OHLCV from watch: {ohlcv_data}")
+                        if ohlcv_list:
+                            for ohlcv_data in ohlcv_list:
+                                if ohlcv_data:
                                     await callback(symbol, timeframe, ohlcv_data)
-                        # 微小的延迟以允许其他任务运行，并防止在某些情况下CPU占用过高
+                        # 重置重试计数器和延迟，因为连接成功并收到数据（或至少没有立即错误）
+                        current_retry_count = 0
+                        retry_delay = initial_retry_delay
                         await asyncio.sleep(0.01)
+
                 except (ccxtpro.NetworkError, ccxtpro.ExchangeNotAvailable, ccxtpro.RequestTimeout) as e:
-                    print(f"DataFetcher: {symbol} {timeframe} OHLCV流网络/连接错误: {e}. 尝试5秒后重连...")
-                    await asyncio.sleep(5)
-                except ccxtpro.NotSupported as e: # 有些交易所可能在运行时才发现不支持特定参数组合
-                    print(f"DataFetcher: {symbol} {timeframe} OHLCV流不被支持: {e}. 停止此流。")
-                    break # 停止此流的循环
-                except Exception as e:
-                    print(f"DataFetcher: {symbol} {timeframe} OHLCV流发生未知错误: {e}. 尝试10秒后重连...")
-                    # 在这里可以添加更复杂的错误处理，例如最大重试次数
-                    await asyncio.sleep(10)
+                    current_retry_count += 1
+                    print(f"DataFetcher: {symbol} {timeframe} OHLCV stream network/connection error (Attempt {current_retry_count}/{max_retries}): {e}. "
+                          f"Retrying in {retry_delay} seconds...")
+                    await asyncio.sleep(retry_delay)
+                    retry_delay = min(retry_delay * 2, max_retry_delay) # Exponential backoff
 
-                if not hasattr(self.exchange, 'watch_ohlcv'): # 如果在循环中交易所对象被替换或关闭
-                    print(f"DataFetcher: 交易所对象似乎已关闭或 watch_ohlcv 不再可用。停止 {symbol} {timeframe} 流。")
-                    break
+                except ccxtpro.NotSupported as e:
+                    print(f"DataFetcher: {symbol} {timeframe} OHLCV stream is not supported by {self.exchange.id}: {e}. Stopping this stream.")
+                    return # 使用 return 来结束 stream_loop 任务
 
-        # 创建并存储任务，以便可以取消它
+                except Exception as e: # 其他未知错误
+                    current_retry_count += 1
+                    print(f"DataFetcher: {symbol} {timeframe} OHLCV stream encountered an unknown error (Attempt {current_retry_count}/{max_retries}): {e}. "
+                          f"Retrying in {retry_delay} seconds...")
+                    # import traceback # DEBUG
+                    # traceback.print_exc() # DEBUG
+                    await asyncio.sleep(retry_delay)
+                    retry_delay = min(retry_delay * 2, max_retry_delay)
+
+                if not hasattr(self.exchange, 'watch_ohlcv'):
+                    print(f"DataFetcher: Exchange object seems closed or watch_ohlcv is no longer available for {symbol} {timeframe}. Stopping this stream.")
+                    return # 结束 stream_loop 任务
+
+            print(f"DataFetcher: {symbol} {timeframe} OHLCV stream reached max retries ({max_retries}). Stopping this stream permanently.")
+            # 此处任务会自然结束
+
+        # 创建并存储任务
         task = asyncio.create_task(stream_loop())
         self._active_streams[stream_key] = task
         print(f"DataFetcher: {symbol} {timeframe} OHLCV流任务已创建。")

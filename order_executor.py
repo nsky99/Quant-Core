@@ -133,34 +133,56 @@ class OrderExecutor:
                 print(f"OrderExecutor ({self.exchange.id}): 为 watch_orders 加载市场时出错: {e}")
                 # 如果市场加载失败，watch_orders 很可能也会失败，但我们让它尝试并在下面捕获
 
-            retry_delay = 5 # 秒
-            while True:
+            current_retry_count = 0
+            max_retries = 5
+            initial_retry_delay = 5  # seconds
+            max_retry_delay = 60 # seconds
+            retry_delay = initial_retry_delay
+
+            while current_retry_count < max_retries:
                 try:
+                    # print(f"OrderExecutor: Attempting to connect '{stream_identifier}' orders stream (Attempt {current_retry_count + 1}/{max_retries})...")
                     while True:
                         orders = await self.exchange.watch_orders(symbol, since, limit, params)
                         if orders:
                             for order_data in orders:
                                 if order_data:
-                                    await callback(order_data) # 将原始订单数据传递给回调
-                        await asyncio.sleep(0.01)
-                except (ccxtpro.NetworkError, ccxtpro.ExchangeNotAvailable, ccxtpro.RequestTimeout) as e:
-                    print(f"OrderExecutor ({self.exchange.id}): '{stream_identifier}' 订单流网络/连接错误: {e}. {retry_delay}秒后重连...")
-                except ccxtpro.AuthenticationError as e:
-                    print(f"OrderExecutor ({self.exchange.id}): '{stream_identifier}' 订单流认证失败: {e}. 请检查API密钥权限。停止此流。")
-                    break
-                except ccxtpro.NotSupported as e: # 可能在运行时发现不支持
-                    print(f"OrderExecutor ({self.exchange.id}): '{stream_identifier}' 订单流不被支持: {e}. 停止此流。")
-                    break
-                except Exception as e:
-                    print(f"OrderExecutor ({self.exchange.id}): '{stream_identifier}' 订单流发生未知错误: {e}. {retry_delay}秒后重连...")
-                    # import traceback # DEBUG
-                    # traceback.print_exc() # DEBUG
+                                    await callback(order_data)
 
-                # 检查是否应停止循环 (例如，如果API密钥失效或交易所对象不再有效)
+                        current_retry_count = 0 # Reset on successful fetch/no immediate error
+                        retry_delay = initial_retry_delay
+                        await asyncio.sleep(0.01)
+
+                except ccxtpro.AuthenticationError as e:
+                    print(f"OrderExecutor ({self.exchange.id}): '{stream_identifier}' 订单流认证失败: {e}. 请检查API密钥权限。永久停止此流。")
+                    return # End stream_loop task
+
+                except ccxtpro.NotSupported as e:
+                    print(f"OrderExecutor ({self.exchange.id}): '{stream_identifier}' 订单流不被支持: {e}. 永久停止此流。")
+                    return # End stream_loop task
+
+                except (ccxtpro.NetworkError, ccxtpro.ExchangeNotAvailable, ccxtpro.RequestTimeout) as e:
+                    current_retry_count += 1
+                    print(f"OrderExecutor ({self.exchange.id}): '{stream_identifier}' 订单流网络/连接错误 (Attempt {current_retry_count}/{max_retries}): {e}. "
+                          f"Retrying in {retry_delay} seconds...")
+                    await asyncio.sleep(retry_delay)
+                    retry_delay = min(retry_delay * 2, max_retry_delay) # Exponential backoff
+
+                except Exception as e: # Catch-all for other unexpected errors during watch_orders
+                    current_retry_count += 1
+                    print(f"OrderExecutor ({self.exchange.id}): '{stream_identifier}' 订单流发生未知错误 (Attempt {current_retry_count}/{max_retries}): {e}.")
+                    # import traceback; traceback.print_exc() # For debugging
+                    print(f"  Retrying in {retry_delay} seconds...")
+                    await asyncio.sleep(retry_delay)
+                    retry_delay = min(retry_delay * 2, max_retry_delay)
+
+                # Check if API keys or method became unavailable during operation (e.g., if exchange object was reconfigured)
                 if not (self.exchange.apiKey and self.exchange.secret and hasattr(self.exchange, 'watch_orders')):
-                    print(f"OrderExecutor ({self.exchange.id}): API凭证或watch_orders不可用。停止 '{stream_identifier}' 订单流。")
-                    break
-                await asyncio.sleep(retry_delay)
+                    print(f"OrderExecutor ({self.exchange.id}): API credentials or watch_orders method became unavailable. Stopping '{stream_identifier}' order stream.")
+                    return # End stream_loop task
+
+            print(f"OrderExecutor ({self.exchange.id}): '{stream_identifier}' 订单流达到最大重试次数 ({max_retries}). 永久停止此流。")
+            # Task will end naturally here
 
         task = asyncio.create_task(stream_loop())
         self._active_order_streams[stream_key] = task

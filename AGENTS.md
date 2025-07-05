@@ -2,104 +2,84 @@
 
 ## 项目目标
 
-本项目旨在提供一个基于 Python 和 `ccxtpro` 库的模块化加密货币量化交易框架基础。它包括数据获取、账户管理、订单执行以及一个策略引擎，该引擎支持通过外部配置文件加载策略、接收实时K线数据和订单事件。
+本项目旨在提供一个基于 Python 和 `ccxtpro` 库的模块化加密货币量化交易框架基础。它包括数据获取、账户管理、订单执行、一个集成了实时K线和订单事件处理的策略引擎（具有增强的流健壮性），以及一个基础的风险管理模块。策略和风险参数均可通过外部配置文件加载。
 
 ## 当前模块
 
-1.  **`data_fetcher.py`**: (内容同前)
-    *   `get_ohlcv()`, `watch_ohlcv_stream()`
+1.  **`data_fetcher.py`**:
+    *   包含 `DataFetcher` 类。
+    *   功能：从指定的加密货币交易所获取市场数据。
+        *   `get_ohlcv()`: 通过 REST API 获取历史K线数据。
+        *   `watch_ohlcv_stream()`: 通过 WebSocket 订阅实时K线数据流，内置增强的错误处理和指数退避重连机制（包括最大重试次数）。
+    *   注意：获取公开市场数据通常不需要 API Key。
 
-2.  **`account_manager.py`**: (内容同前)
+2.  **`account_manager.py`**: (同前)
 
-3.  **`order_executor.py`**: (内容同前)
-    *   交易执行方法, `watch_orders_stream()`
+3.  **`order_executor.py`**:
+    *   包含 `OrderExecutor` 类。
+    *   功能：执行交易操作（如下单、撤单）并提供订单事件流。
+        *   `create_limit_buy/sell_order()`, `cancel_order()`: 执行标准订单操作。
+        *   `watch_orders_stream()`: 通过 WebSocket 订阅实时订单更新，内置增强的错误处理和指数退避重连机制（包括最大重试次数，并特别处理认证错误）。
+    *   **重要**: 此模块进行交易和订阅订单流均需要 API Key 和 Secret，并具有相应权限。
+    *   **风险警告**: 真实交易有风险，强烈建议使用**测试网 (Sandbox)**。
 
-4.  **`strategy.py`**: (内容同前)
-    *   `Strategy` 抽象基类，定义策略接口。
+4.  **`strategy.py`**: (同前)
 
-5.  **`config_loader.py` (新增)**:
-    *   包含 `load_strategies_from_config(config_path)` 函数。
-    *   功能：从指定的 YAML 配置文件中读取策略配置，动态导入并实例化策略类。
-    *   配置文件允许指定策略的名称、模块路径、类名、交易对、K线周期以及自定义参数。
+5.  **`risk_manager.py`**: (同前)
 
-6.  **`strategy_engine.py`**:
+6.  **`config_loader.py`**: (同前)
+
+7.  **`strategy_engine.py`**:
     *   包含 `StrategyEngine` 类。
     *   功能：负责管理和运行一个或多个从配置文件加载的策略实例。
         *   通过 `DataFetcher` 的 `watch_ohlcv_stream` 订阅实时K线数据并分发给策略。
         *   通过 `OrderExecutor` 的 `watch_orders_stream` 订阅实时订单更新并分发给相应策略。
         *   提供交易接口，并在下单后记录订单与策略的映射。
+        *   在 `create_order` 方法中，实际下单前会调用风险管理器的 `check_order_risk` 方法。
+        *   订单成交后，会调用风险管理器的 `update_on_fill` 方法。
+        *   `stop()` 方法现在会记录任何异常结束的流任务。
 
-7.  **`strategies/` (目录)**: (内容同前)
-    *   `strategies/simple_sma_strategy.py`: 示例策略。
+8.  **`strategies/` (目录)**: (同前)
 
-8.  **`main.py`**:
-    *   演示框架核心功能，特别是 `StrategyEngine`。
-    *   **核心演示函数**: `run_configured_strategy_engine(exchange_id, config_file)`。
-        *   使用 `config_loader` 从指定的YAML文件 (默认为 `configs/strategies.yaml`) 加载策略。
-        *   将加载的策略添加到引擎并启动。
-        *   演示包括实时K线处理、基于策略逻辑的自动下单（需配置API Key并在沙箱模式）、以及订单状态的实时反馈。
-    *   允许通过环境变量 `DEFAULT_EXCHANGE_FOR_DEMO` 和 `STRATEGY_CONFIG_FILE` 自定义演示行为。
+9.  **`main.py`**: (同前, 演示使用增强后的模块)
 
 ## 依赖
 
-*   `ccxtpro`, `ccxt`, `pandas`, `numpy`, `PyYAML` (新增)。
-*   依赖项在 `requirements.txt` 文件中列出。
+*   `ccxtpro`, `ccxt`, `pandas`, `numpy`, `PyYAML`.
 
 ## 如何配置和运行
 
-1.  **安装依赖**: `pip install -r requirements.txt` (确保 `PyYAML` 已安装)。
-
-2.  **配置策略 (新增)**:
-    *   在 `configs/` 目录下创建或修改YAML配置文件 (例如 `strategies.yaml`)。
-    *   文件结构示例：
-        ```yaml
-        strategies:
-          - name: "SMABtc1m"
-            module: "strategies.simple_sma_strategy"
-            class: "SimpleSMAStrategy"
-            symbols: ["BTC/USDT"]
-            timeframe: "1m"
-            params:
-              short_sma_period: 10
-              long_sma_period: 20
-          # ... (更多策略配置)
-        ```
-    *   `module`: Python模块的路径 (例如 `strategies.my_strategy`)。
-    *   `class`: 策略类的名称。
-    *   `params`: 一个字典，包含传递给策略构造函数的自定义参数。策略的 `__init__` 或 `on_init` 方法应能处理这些参数。
-
-3.  **配置 API 凭证**: (说明同前，强调 для KuCoin沙箱等)
-
-4.  **运行演示**:
-    ```bash
-    # 默认使用 configs/strategies.yaml 和 kucoin (如果环境变量未设置)
-    python main.py
-
-    # 或者通过环境变量指定
-    # DEFAULT_EXCHANGE_FOR_DEMO=binance STRATEGY_CONFIG_FILE=configs/my_custom_strategies.yaml python main.py
-    ```
-    *   观察控制台输出，查看策略是否从配置文件加载，以及后续的K线和订单事件处理。
+(内容与上一版本基本一致，强调了API Key对订单流和交易的重要性，以及配置文件中风险参数的配置)
+1.  **安装依赖**: `pip install -r requirements.txt`
+2.  **配置策略和风险参数 (YAML)**:
+    *   在 `configs/strategies.yaml` (或通过 `STRATEGY_CONFIG_FILE` 环境变量指定的其他文件) 中进行配置。
+    *   包含 `risk_management` 部分和 `strategies` 列表。
+3.  **配置 API 凭证**: (同前)
+4.  **运行演示**: `python main.py`
+    *   观察控制台输出，流连接失败时应能看到重试逻辑和最终放弃的日志。
 
 ## 创建和运行自己的策略
 
-1.  在 `strategies/` 目录创建策略Python文件，继承 `strategy.Strategy`。
-2.  在 `configs/strategies.yaml` (或你选择的配置文件中) 添加该策略的配置条目，指定其 `module`, `class`, `symbols`, `timeframe`, 和自定义 `params`。
-3.  运行 `python main.py` (确保 `STRATEGY_CONFIG_FILE` 指向包含你策略配置的文件，如果不是默认的)。
+(内容与上一版本一致)
 
 ## 注意事项
 
-*   **配置文件路径**: `config_loader` 和 `main.py` 默认从相对路径加载配置文件。确保运行 `main.py` 时工作目录正确，或者在代码中使用绝对路径。
-*   **动态导入**: 确保策略模块 (`.py` 文件) 位于Python可导入的路径下 (例如，`strategies` 目录本身需要能被Python解释器找到，通常项目根目录会自动在 `sys.path` 中)。
+*   **流的健壮性**: `watch_ohlcv_stream` 和 `watch_orders_stream` 现在包含指数退避重连和最大重试次数。如果流在达到最大重试后仍无法恢复，它将永久停止，引擎将不再从该特定流接收数据。
+*   **风险参数调整**: (同前)
+*   **余额获取**: (同前)
 
 ## 后续开发建议
 
+*   **完善风险管理**:
+    *   实现更复杂的风险规则（例如，基于波动率的订单大小调整、最大回撤限制、多策略间的风险分配）。
+    *   允许策略级别覆盖或补充全局风险参数。
+    *   `RiskManager.update_on_fill` 可以实现更具体的逻辑来跟踪已用风险或更新敞口。
 *   **完善策略引擎**:
-    *   **更多数据流**: 为 `DataFetcher` 和 `StrategyEngine` 添加对其他类型 WebSocket 数据流的支持 (Trades, Ticker)。
-    *   **健壮性**: 进一步增强错误处理、连接重试逻辑。
-*   **风险管理**: 实现独立的风险管理模块。
-*   **数据存储与回测**: 开发历史数据存储和回测功能。
-*   **日志与通知**: 引入更完善的日志系统和通知机制。
-*   **参数验证**: 在 `config_loader` 中添加对策略参数的更严格验证 (例如使用 `pydantic` 或 `jsonschema`)。
+    *   **更多数据流**: 为 `DataFetcher` 和 `StrategyEngine` 添加对其他类型 WebSocket 数据流的支持 (Trades, Ticker)，并为这些新流实现类似的健壮性处理。
+    *   **引擎对流失败的响应**: 实现更主动的机制，例如当某个关键数据流永久失败时，引擎可以选择停止依赖该流的特定策略，或通知用户。
+*   **数据存储与回测**
+*   **日志与通知**
+*   **参数验证** (例如使用 Pydantic)
 
 ---
 

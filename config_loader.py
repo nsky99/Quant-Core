@@ -1,14 +1,16 @@
 import yaml
 import importlib
 from strategy import Strategy # Assuming Strategy base class is in strategy.py at root
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Tuple, Optional
 
-def load_strategies_from_config(config_path: str) -> List[Strategy]:
+def load_config(config_path: str) -> Tuple[List[Strategy], Optional[Dict[str, Any]]]:
     """
-    从指定的 YAML 配置文件加载并实例化策略。
+    从指定的 YAML 配置文件加载策略配置和全局风险管理参数。
 
     :param config_path: YAML 配置文件的路径。
-    :return: 一个包含已实例化策略对象的列表。
+    :return: 一个元组，包含：
+             - instantiated_strategies: 一个包含已实例化策略对象的列表。
+             - risk_params: 一个包含全局风险管理参数的字典，如果未配置则为None或空字典。
     :raises FileNotFoundError: 如果配置文件未找到。
     :raises yaml.YAMLError: 如果YAML文件解析错误。
     :raises ImportError: 如果策略模块无法导入。
@@ -26,22 +28,107 @@ def load_strategies_from_config(config_path: str) -> List[Strategy]:
         print(f"ConfigLoader错误: 解析YAML文件 '{config_path}' 失败: {e}")
         raise
 
-    if not config_data or 'strategies' not in config_data:
-        print(f"ConfigLoader错误: 配置文件 '{config_path}' 格式不正确或缺少 'strategies' 顶层键。")
-        raise ValueError(f"配置文件 '{config_path}' 格式不正确。")
+    if not config_data:
+        print(f"ConfigLoader错误: 配置文件 '{config_path}' 为空或格式不正确。")
+        raise ValueError(f"配置文件 '{config_path}' 为空或格式不正确。")
 
-    strategy_configs: List[Dict[str, Any]] = config_data['strategies']
+    # 加载策略配置
     instantiated_strategies: List[Strategy] = []
+    if 'strategies' in config_data and isinstance(config_data['strategies'], list):
+        strategy_configs: List[Dict[str, Any]] = config_data['strategies']
+        for idx, strat_conf in enumerate(strategy_configs):
+            print(f"\nConfigLoader: 处理策略配置 #{idx + 1} - 名称: {strat_conf.get('name', '未命名')}")
+            try:
+                name = strat_conf.get('name')
+                module_name = strat_conf.get('module')
+                class_name = strat_conf.get('class')
+                symbols = strat_conf.get('symbols')
+                timeframe = strat_conf.get('timeframe')
+                custom_params = strat_conf.get('params', {})
 
-    if not isinstance(strategy_configs, list):
-        print(f"ConfigLoader错误: 'strategies' 键的值必须是一个列表。")
-        raise ValueError("'strategies' 键的值必须是一个列表。")
+                if not all([name, module_name, class_name, symbols, timeframe]):
+                    missing = [k for k,v in {'name':name, 'module':module_name, 'class':class_name, 'symbols':symbols, 'timeframe':timeframe}.items() if v is None]
+                    raise ValueError(f"策略配置 #{idx + 1} (名称: {name or 'N/A'}) 缺少必要字段: {', '.join(missing)}")
 
-    for idx, strat_conf in enumerate(strategy_configs):
-        print(f"\nConfigLoader: 处理配置 #{idx + 1} - 名称: {strat_conf.get('name', '未命名')}")
+                if not isinstance(symbols, list) or not all(isinstance(s, str) for s in symbols):
+                    raise ValueError(f"策略 '{name}': 'symbols' 必须是一个字符串列表。")
+                if not isinstance(timeframe, str):
+                    raise ValueError(f"策略 '{name}': 'timeframe' 必须是一个字符串。")
+                if not isinstance(custom_params, dict):
+                    raise ValueError(f"策略 '{name}': 'params' 必须是一个字典。")
 
-        try:
-            name = strat_conf.get('name')
+                print(f"  模块: {module_name}, 类: {class_name}")
+                strategy_module = importlib.import_module(module_name)
+                StrategyClass = getattr(strategy_module, class_name)
+
+                strategy_instance = StrategyClass(
+                    name=name,
+                    symbols=symbols,
+                    timeframe=timeframe,
+                    params=custom_params
+                )
+
+                if not isinstance(strategy_instance, Strategy):
+                    raise TypeError(f"类 {class_name} 从 {module_name} 加载，但它不是 Strategy 的子类。")
+
+                instantiated_strategies.append(strategy_instance)
+                print(f"  策略 [{name}] 实例化成功。")
+
+            except ImportError as e:
+                print(f"ConfigLoader错误: 导入模块 '{module_name}' 失败 for strategy '{strat_conf.get('name', 'N/A')}': {e}")
+            except AttributeError as e:
+                print(f"ConfigLoader错误: 在模块 '{module_name}' 中找不到类 '{class_name}' for strategy '{strat_conf.get('name', 'N/A')}': {e}")
+            except ValueError as e:
+                print(f"ConfigLoader错误: 配置问题 for strategy '{strat_conf.get('name', 'N/A')}': {e}")
+            except TypeError as e:
+                 print(f"ConfigLoader错误: 实例化策略 '{strat_conf.get('name', 'N/A')}' 时发生类型错误: {e}")
+            except Exception as e:
+                print(f"ConfigLoader错误: 实例化策略 '{strat_conf.get('name', 'N/A')}' 时发生未知错误: {e}")
+    elif 'strategies' in config_data: # 'strategies' 存在但不是列表
+        print(f"ConfigLoader错误: 'strategies' 键的值必须是一个列表，但在配置文件中找到类型 {type(config_data['strategies'])}。")
+        # 可以选择抛出ValueError或返回空的策略列表
+    else: # 'strategies' 键不存在
+        print(f"ConfigLoader警告: 配置文件中未找到 'strategies' 部分。将不加载任何策略。")
+
+
+    # 加载风险管理参数
+    risk_params: Optional[Dict[str, Any]] = None
+    if 'risk_management' in config_data and isinstance(config_data['risk_management'], dict):
+        risk_params = config_data['risk_management']
+        print(f"\nConfigLoader: 加载了风险管理参数: {risk_params}")
+    elif 'risk_management' in config_data:
+        print(f"ConfigLoader错误: 'risk_management' 键的值必须是一个字典，但在配置文件中找到类型 {type(config_data['risk_management'])}。")
+    else:
+        print(f"ConfigLoader警告: 配置文件中未找到 'risk_management' 部分。将使用默认风险参数（如果RiskManager有定义）。")
+        risk_params = {} # 返回空字典表示使用默认值
+
+    print(f"\nConfigLoader: 完成加载。共实例化 {len(instantiated_strategies)} 个策略。")
+    return instantiated_strategies, risk_params
+
+if __name__ == '__main__':
+    # 这是一个简单的演示，如何使用 load_strategies_from_config
+    # 假设你在项目根目录运行此脚本，并且 configs/strategies.yaml 已创建
+
+    # 获取当前脚本的目录，然后构建到 config 文件的路径
+    # 这使得脚本可以从任何位置运行，只要 configs 目录相对于它在正确的位置
+    # current_file_dir = os.path.dirname(os.path.abspath(__file__))
+    # config_file_path = os.path.join(current_file_dir, '..', 'configs', 'strategies.yaml') # '..' 返回上一级
+
+    # 更简单的方式，如果假设脚本总是在项目根目录下被调用（例如通过 main.py）
+    config_file_path_from_root = 'configs/strategies.yaml'
+
+    print(f"--- ConfigLoader 独立演示 ---")
+    print(f"将尝试从 '{config_file_path_from_root}' 加载配置。")
+
+    loaded_strategies = []
+    loaded_risk_params = None
+    try:
+        loaded_strategies, loaded_risk_params = load_config(config_file_path_from_root) # 注意函数名和返回值变化
+    except Exception as e:
+        print(f"独立演示中加载配置失败: {e}")
+
+    if loaded_strategies:
+        print(f"\n--- 已加载的策略 ({len(loaded_strategies)}) ---")
             module_name = strat_conf.get('module')
             class_name = strat_conf.get('class')
             symbols = strat_conf.get('symbols')
