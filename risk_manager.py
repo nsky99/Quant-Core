@@ -21,7 +21,7 @@ class RiskManagerBase(ABC):
         price: Optional[float] = None,
         current_position: float = 0.0,
         available_balance: float = 0.0,
-        # leverage: float = 1.0 # For futures/margin
+        strategy_specific_params: Optional[Dict] = None # 新增参数
     ) -> bool:
         """
         在下单前检查订单是否符合风险规则。
@@ -34,15 +34,17 @@ class RiskManagerBase(ABC):
         :param price: 下单价格 (计价货币)，市价单时可能为None。
         :param current_position: 当前该交易对的持仓量 (正为多头, 负为空头, 0为无仓位)。
         :param available_balance: 当前可用于该交易的计价货币余额。
+        :param strategy_specific_params: 该策略实例特定的风险参数，可覆盖全局设置。
         :return: True 如果订单允许，False 如果订单被拒绝。
         """
         pass
 
     @abstractmethod
-    async def update_on_fill(self, order_data: Dict):
+    async def update_on_fill(self, strategy_name: str, order_data: Dict): # 新增 strategy_name
         """
         当订单发生实际成交时，由引擎调用此方法以更新风险管理器的内部状态。
 
+        :param strategy_name: 产生该成交订单的策略名称。
         :param order_data: 已成交的订单数据 (ccxt Order 结构)。
         """
         pass
@@ -77,12 +79,14 @@ class BasicRiskManager(RiskManagerBase):
         # max_position_per_symbol: {'BTC/USDT': 1.0, 'ETH/USDT': 10.0} (单位是基础货币)
         self.max_position_per_symbol: Dict[str, float] = self.params.get('max_position_per_symbol', {})
         # max_capital_per_order_ratio: 订单价值占可用余额的最大比例, e.g., 0.02 for 2%
-        self.max_capital_per_order_ratio: float = self.params.get('max_capital_per_order_ratio', 0.1) # 默认10%
-        # min_order_value: 订单的最小名义价值 (in quote currency, e.g., USDT)
-        self.min_order_value: float = self.params.get('min_order_value', 10.0) # 例如，最小10 USDT
+        self.max_capital_per_order_ratio: float = self.params.get('max_capital_per_order_ratio', 0.1)
+        self.min_order_value: float = self.params.get('min_order_value', 10.0)
 
-        print(f"BasicRiskManager initialized.")
-        print(f"  Max position per symbol: {self.max_position_per_symbol}")
+        # 新增: 用于跟踪每个策略/交易对的风险敞口 (名义价值)
+        self.strategy_exposures: Dict[str, Dict[str, float]] = {} # {strategy_name: {symbol: exposure_value}}
+
+        print(f"BasicRiskManager initialized with global params:")
+        print(f"  Global Max position per symbol: {self.max_position_per_symbol}")
         print(f"  Max capital per order ratio: {self.max_capital_per_order_ratio}")
         print(f"  Min order value: {self.min_order_value}")
 
@@ -96,99 +100,85 @@ class BasicRiskManager(RiskManagerBase):
         amount: float,
         price: Optional[float] = None,
         current_position: float = 0.0,
-        available_balance: float = 0.0
+        available_balance: float = 0.0,
+        strategy_specific_params: Optional[Dict] = None
     ) -> bool:
         """
-        执行基础的风险检查。
+        执行基础的风险检查，优先使用策略特定参数。
         """
+        strat_params = strategy_specific_params if strategy_specific_params is not None else {}
+
+        # 获取有效的风险参数值，优先策略特定，然后全局，然后默认
+        # For max_position_per_symbol, it's a dict, so merging or specific lookup is needed.
+        # We'll handle it символ-by-символ.
+
+        effective_max_capital_ratio = strat_params.get('max_capital_per_order_ratio', self.max_capital_per_order_ratio)
+        effective_min_order_value = strat_params.get('min_order_value', self.min_order_value)
+
+        # For max_position_per_symbol, we need to check strategy-specific first, then global for the specific symbol
+        global_max_pos_for_symbol = self.max_position_per_symbol.get(symbol)
+        strat_max_pos_config = strat_params.get('max_position_per_symbol', {})
+        effective_max_pos_for_symbol = strat_max_pos_config.get(symbol, global_max_pos_for_symbol)
+
+
         print(f"RiskManager [{strategy_name}]: Checking order risk for {side} {amount} {symbol} @ {price or 'Market'}")
+        print(f"  Params: MaxPosSym={effective_max_pos_for_symbol}, CapRatio={effective_max_capital_ratio}, MinVal={effective_min_order_value}")
         print(f"  Current position: {current_position}, Available balance: {available_balance}")
 
-        # 0. 检查 amount 是否为正
         if amount <= 0:
             print(f"RiskManager [{strategy_name}]: REJECTED - Order amount must be positive. Got: {amount}")
             return False
 
-        # 1. 检查最大仓位限制
-        max_pos_for_symbol = self.max_position_per_symbol.get(symbol)
-        if max_pos_for_symbol is not None:
-            projected_position = 0
-            if side == 'buy':
-                projected_position = current_position + amount
-            elif side == 'sell':
-                projected_position = current_position - amount
-
-            # 注意：这里的仓位是绝对值比较，对于允许做空的策略，需要调整逻辑
-            # 例如，区分多头最大仓位和空头最大仓位
-            if abs(projected_position) > max_pos_for_symbol:
-                print(f"RiskManager [{strategy_name}]: REJECTED - Order for {symbol} would exceed max position limit.")
-                print(f"  Current: {current_position}, Order Amount: {amount}, Projected: {projected_position}, Limit: {max_pos_for_symbol}")
+        if effective_max_pos_for_symbol is not None:
+            projected_position = current_position + amount if side == 'buy' else current_position - amount
+            if abs(projected_position) > effective_max_pos_for_symbol:
+                print(f"RiskManager [{strategy_name}]: REJECTED (MaxPos) - Symbol: {symbol}, ProjPos: {projected_position:.8f}, Limit: {effective_max_pos_for_symbol:.8f}")
                 return False
 
-        # 2. 检查订单价值和资金占用
         order_value = 0
-        if order_type.lower() == 'market' and side.lower() == 'buy':
-            # 对于市价买单，price 可能是指花费多少计价货币，或者ccxt会用可用余额的一部分
-            # 如果 price is None，我们可能需要估算或依赖交易所行为。
-            # 一个简单的估算是用可用余额的一小部分作为订单价值上限。
-            # 这里我们假设如果 price 为 None 的市价买单，其价值是 amount * (一个估算的市价，但我们没有)
-            # 或者，如果策略明确要用一定比例的余额，那应该在amount计算时就体现。
-            # 此处简化：如果市价单没有提供price，我们跳过基于价值的检查，或者要求price必须提供（即使是市价买单也用作估算）
-            # 为了简单，如果 price 为 None (例如某些交易所的市价单不需要价格)，我们假设其价值通过 amount * (一个非常不利的滑点价格) 来估算
-            # 但更安全的做法是要求市价买单也提供一个“预期”或“上限”价格用于风险计算，或者直接使用可用余额的比例。
-            # 这里我们假设如果 price 未提供，则此项检查依赖于 available_balance 和 max_capital_per_order_ratio
-            if price is None: # 市价单通常不提供价格，或者price代表要花费的金额
-                 # 如果是市价买单，amount 通常是基础货币数量，price 代表花费的计价货币总额（某些交易所）
-                 # 或者 amount 是计价货币数量（如 'createMarketBuyOrderWithCost'）
-                 # ccxt 的 create_market_buy_order(symbol, amount) 中 amount 是基础货币数量
-                 # 我们需要一个预估价格来计算名义价值
-                 # 这是一个复杂点，暂时简化：如果市价单 price 为 None，我们无法精确计算 order_value
-                 # 除非 price 参数对于市价买单有特殊含义（例如，花费的金额）
-                 # 假设：如果 price is None for market buy, 我们用 available_balance * ratio 来限制 amount
-                 pass # 见下面的资金占用检查
-
-        if price is not None: # 对于限价单，或提供了价格的市价单
+        if price is not None: # Limit orders or Market orders where price is meaningful (e.g. cost for market buy)
             order_value = amount * price
 
-            # 2a. 最小订单价值检查
-            if order_value < self.min_order_value:
-                print(f"RiskManager [{strategy_name}]: REJECTED - Order value {order_value:.2f} for {symbol} is below min_order_value {self.min_order_value:.2f}.")
+            if order_value < effective_min_order_value:
+                print(f"RiskManager [{strategy_name}]: REJECTED (MinVal) - Symbol: {symbol}, Value: {order_value:.2f}, Min: {effective_min_order_value:.2f}")
                 return False
 
-            # 2b. 最大资金占用比例检查 (仅对买单或开空仓检查，平仓不消耗新的资金)
-            # 此处简化：主要针对买入消耗计价货币的情况
-            if side == 'buy': # 或者未来开空仓也需要保证金
-                max_capital_for_order = available_balance * self.max_capital_per_order_ratio
+            if side == 'buy': # Only check capital ratio for buys or opening shorts (not implemented for shorts yet)
+                max_capital_for_order = available_balance * effective_max_capital_ratio
                 if order_value > max_capital_for_order:
-                    print(f"RiskManager [{strategy_name}]: REJECTED - Order value {order_value:.2f} for {symbol} exceeds max capital per order ratio.")
-                    print(f"  Order value: {order_value:.2f}, Allowed: {max_capital_for_order:.2f} (Balance: {available_balance:.2f} * Ratio: {self.max_capital_per_order_ratio})")
+                    print(f"RiskManager [{strategy_name}]: REJECTED (CapRatio) - Symbol: {symbol}, Value: {order_value:.2f}, MaxAllowed: {max_capital_for_order:.2f}")
                     return False
-        elif side == 'buy': # 市价买单且price为None，检查amount是否在可用资金的一定比例内能买得起（需要预估价格）
-            # 这是一个粗略的检查，更好的方式是在策略层面计算好amount
-            # 或者 get_max_order_amount 提供此功能
-             print(f"RiskManager [{strategy_name}]: WARNING - Market buy order for {symbol} without price; precise capital check skipped. Ensure 'amount' is appropriate.")
+        elif side == 'buy' and order_type.lower() == 'market':
+             print(f"RiskManager [{strategy_name}]: WARNING - Market buy for {symbol} without price; precise capital/min_value checks skipped.")
 
-
-        # 如果所有检查通过
         print(f"RiskManager [{strategy_name}]: Order for {symbol} PASSED risk checks.")
         return True
 
-    async def update_on_fill(self, order_data: Dict):
-        """
-        订单成交后更新风险管理器的内部状态。
-        对于 BasicRiskManager，可能不需要太多更新，因为检查是基于下单前的。
-        但可以用于记录已用风险、更新敞口等。
-        """
-        strategy_name = order_data.get('clientOrderId', 'UnknownStrategy').split('_')[0] # 假设 clientOrderId 包含策略名
+    async def update_on_fill(self, strategy_name: str, order_data: Dict):
         symbol = order_data.get('symbol')
-        filled_amount = order_data.get('filled', 0)
         side = order_data.get('side')
+        filled_amount = order_data.get('filled')
+        average_price = order_data.get('average')
 
-        # print(f"RiskManager: Received fill for strategy {strategy_name} on {symbol}. Filled: {filled_amount} {side}.")
-        # 这里可以添加逻辑，例如：
-        # - 更新每个策略/交易对的总已用保证金/风险资本
-        # - 记录活跃仓位信息以用于更复杂的组合风险管理
-        pass
+        if not all([symbol, side, filled_amount, average_price]):
+            print(f"RiskManager ({strategy_name}): Insufficient data in order_data to update exposure for order {order_data.get('id')}.")
+            return
+
+        if filled_amount <= 0: # No change or erroneous data
+            return
+
+        nominal_change = filled_amount * average_price
+        if side == 'sell':
+            nominal_change = -nominal_change # Selling reduces positive exposure or increases negative (short)
+
+        if strategy_name not in self.strategy_exposures:
+            self.strategy_exposures[strategy_name] = {}
+
+        current_exposure = self.strategy_exposures[strategy_name].get(symbol, 0.0)
+        new_exposure = current_exposure + nominal_change
+        self.strategy_exposures[strategy_name][symbol] = new_exposure
+
+        print(f"RiskManager ({strategy_name}): Updated exposure for {symbol}. Prev: {current_exposure:.2f}, Change: {nominal_change:.2f}, New: {new_exposure:.2f} USDT (approx).")
 
 
     async def get_max_order_amount(

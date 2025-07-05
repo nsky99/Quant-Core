@@ -1,79 +1,88 @@
 # Global Risk Management Configuration
+# These parameters will be used by the BasicRiskManager as defaults
+# if not overridden by strategy-specific risk_params.
 risk_management:
   max_position_per_symbol:
-    BTC/USDT: 0.05
-    ETH/USDT: 0.5
-    # For a demo strategy that might trade a different symbol, e.g., LTC/USDT
-    LTC/USDT: 1.0
-  max_capital_per_order_ratio: 0.02
-  min_order_value: 10.0
+    BTC/USDT: 0.05  # Global default: Max 0.05 BTC
+    ETH/USDT: 0.5   # Global default: Max 0.5 ETH
+    LTC/USDT: 1.0   # Global default: Max 1.0 LTC
+    DEFAULT: 1000   # A global default for any other symbol not explicitly listed
+  max_capital_per_order_ratio: 0.02 # Global default: 2% of available balance per order
+  min_order_value: 10.0             # Global default: 10 USDT
 
 # Strategy Configurations
 strategies:
-  - name: "SMABtc1m_WithExtraFeeds"
+  - name: "SMABtc1m_ConservativeRisk"
     module: "strategies.simple_sma_strategy"
     class: "SimpleSMAStrategy"
-    symbols: ["BTC/USDT"] # This strategy will get OHLCV for BTC/USDT
+    symbols: ["BTC/USDT"]
     timeframe: "1m"
     params:
       short_sma_period: 10
       long_sma_period: 20
-      # New parameters to subscribe to additional feeds for symbols listed above:
-      subscribe_trades: true   # Request trades stream for BTC/USDT
-      subscribe_ticker: true   # Request ticker stream for BTC/USDT
-      # Parameters for MyOrderEventStrategyInMain behaviour (if this strategy class supports them)
-      # max_orders_to_place: 1
-      # order_amount: 0.0001
-      # price_offset_factor: 0.90
-      # trade_interval_bars: 3
+      subscribe_trades: true
+      subscribe_ticker: true
+    risk_params: # Strategy-specific risk settings, overrides global for this strategy
+      max_position_per_symbol:
+        BTC/USDT: 0.01  # More conservative BTC limit for this strategy
+      max_capital_per_order_ratio: 0.01 # Use only 1% of balance per order
+      min_order_value: 12.0 # Higher min order value for this strategy
+      # Note: If a key like 'max_position_per_symbol' is present here,
+      # it completely REPLACES the global 'max_position_per_symbol' dict for this strategy's checks.
+      # It does not merge them. If you want this strategy to also have an ETH limit, add it here.
+      # If a symbol (e.g. ETH/USDT) is not in this strategy-specific map,
+      # BasicRiskManager will NOT fall back to the global map for that specific symbol's position limit.
+      # It will effectively have no position limit from this rule unless you define a DEFAULT here too.
+      # This behavior might need refinement in BasicRiskManager for more intuitive merging/fallback.
+      # For now, be explicit in strategy_specific_params if you define max_position_per_symbol.
 
-  - name: "SMAEth5m_OHLCVOnly"
+  - name: "SMAEth5m_GlobalRisk"
     module: "strategies.simple_sma_strategy"
     class: "SimpleSMAStrategy"
-    symbols: ["ETH/USDT"] # This strategy will get OHLCV for ETH/USDT
+    symbols: ["ETH/USDT"]
     timeframe: "5m"
     params:
       short_sma_period: 5
       long_sma_period: 12
-      # This instance does not request trades or ticker explicitly, so defaults (false) will apply.
-      # subscribe_trades: false # Explicitly false or omitted
-      # subscribe_ticker: false # Explicitly false or omitted
+      # This strategy does not define 'risk_params', so it will use the
+      # global settings from the 'risk_management' section above.
+      # e.g., max_position_per_symbol for ETH/USDT will be 0.5 from global.
+      # max_capital_per_order_ratio will be 0.02 from global.
 
-  # Example for a strategy that might only want ticker for a specific symbol,
-  # and trades for another, but no OHLCV directly from its primary `symbols` list.
-  # This requires more advanced subscription logic in StrategyEngine or clearer param definition.
-  # For now, `subscribe_trades` and `subscribe_ticker` apply to all symbols in the `symbols` list.
-  # - name: "MultiFeedStrategy"
-  #   module: "strategies.advanced_strategy" # Hypothetical
-  #   class: "AdvancedStrategy"
-  #   symbols: ["LTC/USDT", "XRP/USDT"] # Primary symbols for OHLCV (if timeframe is set)
-  #   timeframe: "1h" # Or null/None if no OHLCV needed for primary symbols
-  #   params:
-  #     # Option 1: Simple booleans apply to all symbols in the main list
-  #     # subscribe_trades: true
-  #     # subscribe_ticker: true
-  #     # Option 2: More granular control (requires more complex parsing in engine)
-  #     # stream_subscriptions:
-  #     #   "LTC/USDT": ["ticker"]
-  #     #   "XRP/USDT": ["trades", "ticker"]
-  #     #   "BTC/USDT": ["ohlcv:1m", "ticker"] # Example for a symbol not in main list
-  #     # For simplicity, we'll stick to Option 1 for now (booleans in params).
-  #     # The engine will subscribe to these feeds for ALL symbols in the strategy's `symbols` list.
-  #     subscribe_trades_for_symbols: ["XRP/USDT"] # Example of specific symbol targeting
-  #     subscribe_ticker_for_symbols: ["LTC/USDT", "XRP/USDT"]
+  # Example of a strategy that might use a different set of symbols and
+  # falls back to the global DEFAULT for max_position_per_symbol for LTC/USDT
+  # if LTC/USDT is not in its own risk_params.max_position_per_symbol
+  # (Assuming BasicRiskManager is updated to handle DEFAULT fallback more gracefully)
+  - name: "SMALtc15m_MixedRisk"
+    module: "strategies.simple_sma_strategy"
+    class: "SimpleSMAStrategy"
+    symbols: ["LTC/USDT"]
+    timeframe: "15m"
+    params:
+      short_sma_period: 8
+      long_sma_period: 21
+      subscribe_ticker: true
+    risk_params:
+      # Only overrides max_capital_per_order_ratio for this strategy.
+      # max_position_per_symbol for LTC/USDT would come from global (1.0).
+      # min_order_value would come from global (10.0).
+      max_capital_per_order_ratio: 0.03
 
-  # If using MyConfigurableDemoStrategy from main.py (assuming main.py is importable as 'main')
-  # This strategy needs to be adapted to understand subscribe_trades/tickers from its params.
-  # - name: "MainDemoWithTrades"
-  #   module: "main"
-  #   class: "MyConfigurableDemoStrategy"
-  #   symbols: ["BTC/USDT"] # KuCoin often uses BTC-USDT for sandbox
+  # Configuration for MyConfigurableDemoStrategy (if it's in main.py and main is importable)
+  # Or, more typically, this class would be in the 'strategies' directory.
+  # module: "main" or "strategies.my_configurable_demo_strategy"
+  # class: "MyConfigurableDemoStrategy"
+  # - name: "DemoMainStrategyWithRisk"
+  #   module: "__main__" # This might work if main.py is the entry point and class is global
+  #   class: "MyConfigurableDemoStrategy" # Assuming MyConfigurableDemoStrategy is defined in main.py
+  #   symbols: ["BTC/USDT"]
   #   timeframe: "1m"
   #   params:
-  #     max_orders_to_place: 1
-  #     order_amount: 0.00002 # Ensure this is above minimum for the exchange (e.g. KuCoin sandbox)
-  #     price_offset_factor: 0.95 # Buy 5% below close
+  #     max_orders_to_place: 2
   #     trade_interval_bars: 2
+  #     order_amount: 0.00002
+  #     price_offset_factor: 0.95
   #     subscribe_trades: true
-  #     subscribe_ticker: true
+  #   risk_params:
+  #     min_order_value: 5.0 # Specific min value for this demo strategy
 yaml

@@ -61,11 +61,18 @@ def load_config(config_path: str) -> Tuple[List[Strategy], Optional[Dict[str, An
                 strategy_module = importlib.import_module(module_name)
                 StrategyClass = getattr(strategy_module, class_name)
 
+                # 新增：获取策略特定的风险参数
+                strategy_risk_params = strat_conf.get('risk_params', {}) # 默认为空字典
+                if not isinstance(strategy_risk_params, dict):
+                    print(f"ConfigLoader警告: 策略 '{name}' 的 'risk_params' 不是一个字典，将被忽略。使用: {strategy_risk_params}")
+                    strategy_risk_params = {}
+
                 strategy_instance = StrategyClass(
                     name=name,
                     symbols=symbols,
                     timeframe=timeframe,
-                    params=custom_params
+                    params=custom_params,
+                    risk_params=strategy_risk_params # 传递策略特定风险参数
                 )
 
                 if not isinstance(strategy_instance, Strategy):

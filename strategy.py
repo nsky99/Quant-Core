@@ -1,12 +1,19 @@
 from abc import ABC, abstractmethod
 import pandas as pd
+from typing import List, Dict, Optional # Added List, Dict, Optional
 
 class Strategy(ABC):
     """
     策略抽象基类。
     所有具体策略都应继承此类并实现其抽象方法。
     """
-    def __init__(self, name: str, symbols: list[str], timeframe: str, engine=None):
+    def __init__(self,
+                 name: str,
+                 symbols: List[str],
+                 timeframe: str,
+                 engine=None,
+                 params: Optional[Dict] = None, # Added params
+                 risk_params: Optional[Dict] = None): # Added risk_params
         """
         初始化策略。
 
@@ -14,15 +21,21 @@ class Strategy(ABC):
         :param symbols: 策略关注的交易对列表，例如 ['BTC/USDT', 'ETH/USDT']。
         :param timeframe: K线周期，例如 '1m', '5m', '1h', '1d'。
         :param engine: 策略引擎的实例，策略通过它与市场和执行器交互。
+        :param params: 策略特定的自定义参数字典 (通常来自配置文件)。
+        :param risk_params: 该策略实例特定的风险参数字典 (通常来自配置文件)。
         """
         self.name = name
-        self._symbols = symbols # 策略希望订阅的原始交易对列表
+        self._symbols = symbols
         self._timeframe = timeframe
         self._engine = engine
-        self._active = False # 策略是否激活
-        self.position = {} # 持仓信息 {symbol: amount}
+        self._active = False
+        self.position: Dict[str, float] = {} # 持仓信息 {symbol: amount}
+
+        self.params: Dict = params if params is not None else {} # Store custom params
+        self.risk_params: Optional[Dict] = risk_params # Store strategy-specific risk params
 
         # 策略开发者可以在 on_init 中初始化更多特定于策略的状态
+        # on_init 现在可以访问 self.params 和 self.risk_params
         self.on_init()
 
     @property
