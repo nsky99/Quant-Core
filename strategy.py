@@ -1,6 +1,7 @@
 from abc import ABC, abstractmethod
 import pandas as pd
-from typing import List, Dict, Optional # Added List, Dict, Optional
+from typing import List, Dict, Optional, Type # Added Type
+from pydantic import BaseModel # For type hinting get_params_model
 
 class Strategy(ABC):
     """
@@ -284,6 +285,25 @@ class Strategy(ABC):
         # 默认不执行任何操作，子类可以覆盖。
         # 例如: await self.liquidate_position(symbol)
         pass
+
+    @classmethod
+    def get_params_model(cls) -> Optional[Type[BaseModel]]:
+        """
+        (可选) 返回一个Pydantic模型类，用于验证此策略类型特定的参数。
+        如果返回 None，则策略的 `params` 将不会经过特定于此策略的Pydantic验证，
+        但仍然会通过 `config_models.StrategyParams` 进行通用验证（如果配置了）。
+
+        子类应覆盖此方法以提供其自定义的参数模型。
+        例如:
+            from pydantic import BaseModel, Field
+            class MyStrategyParams(BaseModel):
+                my_param: int = Field(..., gt=0)
+
+            @classmethod
+            def get_params_model(cls):
+                return MyStrategyParams
+        """
+        return None
 
 
 if __name__ == '__main__':
