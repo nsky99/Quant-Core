@@ -268,6 +268,23 @@ class Strategy(ABC):
         #     print(f"  -> Trade ID: {trade.get('id')}, Side: {trade.get('side')}, Price: {trade.get('price')}, Amount: {trade.get('amount')}")
         pass
 
+    async def on_stream_failed(self, symbol: Optional[str], stream_type: str, timeframe: Optional[str], error_info: Exception):
+        """
+        (可选) 当一个与此策略相关的数据流永久失败时，由引擎调用。
+        策略可以在此执行特定的清理操作，例如尝试平仓、记录状态等，
+        在引擎默认停止此策略之前。
+
+        :param symbol: 相关的交易对符号。对于全局流（如订单流），可能为None。
+        :param stream_type: 失败的流的类型 (e.g., 'OHLCV', 'Trades', 'Ticker', 'Orders')。
+        :param timeframe: K线周期 (仅对OHLCV流有意义，其他流为None)。
+        :param error_info: 导致失败的异常或错误信息。
+        """
+        print(f"策略 [{self.name}]: 警告 - 数据流 '{stream_type}' for symbol '{symbol or 'N/A'}'"
+              f"{'@'+timeframe if timeframe else ''} 已永久失败. Error: {error_info}")
+        # 默认不执行任何操作，子类可以覆盖。
+        # 例如: await self.liquidate_position(symbol)
+        pass
+
 
 if __name__ == '__main__':
     # 这是一个抽象类，不能直接实例化。
