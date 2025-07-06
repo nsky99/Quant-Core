@@ -86,8 +86,10 @@ def load_config(config_path: str) -> Tuple[List[Strategy], Optional[Dict[str, An
                         # 决定：config_loader 负责验证。如果验证成功，它将验证后的字典传递给策略。
                         # 策略的 on_init 可以选择用自己的模型再次解析这个字典，或者直接使用。
                         # 这样 Strategy 基类 __init__ 的 params: Dict 签名保持不变。
-                        validated_params_for_strat = validated_params_model_instance.model_dump()
-                        print(f"  策略 [{strat_conf_item.name}] 的特定参数通过其Pydantic模型验证成功。")
+                        # --- NEW: Pass Pydantic model instance directly ---
+                        validated_params_for_strat = validated_params_model_instance
+                        # --- END NEW ---
+                        print(f"  策略 [{strat_conf_item.name}] 的特定参数通过其Pydantic模型验证成功 (将传递模型实例)。")
                     except ValidationError as ve_strat:
                         print(f"ConfigLoader错误: 策略 [{strat_conf_item.name}] 的特定参数验证失败:")
                         for error in ve_strat.errors():

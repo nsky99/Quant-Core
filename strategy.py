@@ -1,6 +1,6 @@
 from abc import ABC, abstractmethod
 import pandas as pd
-from typing import List, Dict, Optional, Type # Added Type
+from typing import List, Dict, Optional, Type, Any, Union # Added Any, Union
 from pydantic import BaseModel # For type hinting get_params_model
 
 class Strategy(ABC):
@@ -13,30 +13,31 @@ class Strategy(ABC):
                  symbols: List[str],
                  timeframe: str,
                  engine=None,
-                 params: Optional[Dict] = None, # Added params
-                 risk_params: Optional[Dict] = None): # Added risk_params
+                 params: Optional[Union[Dict[str, Any], BaseModel]] = None, # Can be a dict or a Pydantic model instance
+                 risk_params: Optional[Dict] = None):
         """
         初始化策略。
 
         :param name: 策略名称。
-        :param symbols: 策略关注的交易对列表，例如 ['BTC/USDT', 'ETH/USDT']。
-        :param timeframe: K线周期，例如 '1m', '5m', '1h', '1d'。
-        :param engine: 策略引擎的实例，策略通过它与市场和执行器交互。
-        :param params: 策略特定的自定义参数字典 (通常来自配置文件)。
-        :param risk_params: 该策略实例特定的风险参数字典 (通常来自配置文件)。
+        :param symbols: 策略关注的交易对列表。
+        :param timeframe: K线周期。
+        :param engine: 策略引擎实例。
+        :param params: 策略特定参数。可以是经过Pydantic验证的模型实例，或原始字典。
+        :param risk_params: 策略特定风险参数字典。
         """
         self.name = name
         self._symbols = symbols
         self._timeframe = timeframe
         self._engine = engine
         self._active = False
-        self.position: Dict[str, float] = {} # 持仓信息 {symbol: amount}
+        self.position: Dict[str, float] = {}
 
-        self.params: Dict = params if params is not None else {} # Store custom params
-        self.risk_params: Optional[Dict] = risk_params # Store strategy-specific risk params
+        # self.params can now be a Pydantic model instance or a dict
+        self.params: Union[Dict[str, Any], BaseModel] = params if params is not None else {}
+        self.risk_params: Optional[Dict] = risk_params
 
-        # 策略开发者可以在 on_init 中初始化更多特定于策略的状态
-        # on_init 现在可以访问 self.params 和 self.risk_params
+        # on_init can access self.params (which might be a Pydantic model)
+        # and self.risk_params (which is always a dict or None)
         self.on_init()
 
     @property

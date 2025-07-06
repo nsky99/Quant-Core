@@ -53,19 +53,40 @@ class SimpleSMAStrategy(Strategy):
         # Access parameters through self.params (which should be a validated Pydantic model instance
         # if config_loader is modified to assign the validated model to strategy.params)
         # If self.params is still a dict (config_loader not yet updated to assign model), then .get() is safer.
+        # Now, self.params is expected to be an instance of SimpleSMAParams if validation was done by config_loader
+        # or a dict if instantiated directly for tests without prior Pydantic validation by loader.
+
+        # Attempt to access params as if it's a SimpleSMAParams model instance.
+        # If config_loader passes the model instance, this will work directly.
+        # If config_loader passes a dict (our current setup), this direct access will fail,
+        # UNLESS we ensure self.params is ALWAYS a Pydantic model by re-parsing in on_init if it's a dict.
+        # For now, we'll keep the isinstance check.
+
         if isinstance(self.params, SimpleSMAParams):
+            # If config_loader already passed a validated SimpleSMAParams instance
             self.short_sma_period = self.params.short_sma_period
             self.long_sma_period = self.params.long_sma_period
             self.subscribe_trades = self.params.subscribe_trades
             self.subscribe_ticker = self.params.subscribe_ticker
-        else: # Fallback if params is a dict (e.g. during direct instantiation for tests or if loader not updated)
-            self.short_sma_period = self.params.get('short_sma_period', 10)
-            self.long_sma_period = self.params.get('long_sma_period', 20)
-            self.subscribe_trades = self.params.get('subscribe_trades', False)
-            self.subscribe_ticker = self.params.get('subscribe_ticker', False)
-            # Manual validation if not using Pydantic instance directly
-            if self.short_sma_period >= self.long_sma_period:
-                 raise ValueError("SimpleSMAStrategy: long_sma_period must be greater than short_sma_period (fallback check).")
+        elif isinstance(self.params, dict):
+            # If config_loader passed a dict (current setup), or for direct instantiation with a dict.
+            # We can choose to validate it here using the strategy's own model.
+            try:
+                validated_params_model = SimpleSMAParams(**self.params)
+                self.short_sma_period = validated_params_model.short_sma_period
+                self.long_sma_period = validated_params_model.long_sma_period
+                self.subscribe_trades = validated_params_model.subscribe_trades
+                self.subscribe_ticker = validated_params_model.subscribe_ticker
+                # Replace self.params with the validated model instance for consistency
+                self.params = validated_params_model
+            except ValidationError as e:
+                print(f"策略 [{self.name}] 参数验证失败 (on_init fallback): {e.errors()}")
+                # Decide on error handling: raise, or use hardcoded defaults, or stop strategy
+                # For now, re-raise to make it explicit that params are incorrect.
+                raise ValueError(f"Invalid parameters for {self.name}: {e.errors()}")
+        else:
+            # Should not happen if __init__ type hints are respected by loader or direct use
+            raise TypeError(f"策略 [{self.name}] 的参数类型未知: {type(self.params)}")
 
 
         self.close_prices: Dict[str, List[float]] = {}
