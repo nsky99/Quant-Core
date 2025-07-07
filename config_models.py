@@ -1,5 +1,5 @@
 from pydantic import BaseModel, Field, validator, ValidationError
-from typing import List, Dict, Optional, Any
+from typing import List, Dict, Optional, Any, Literal # Added Literal
 
 class StrategySpecificRiskParams(BaseModel):
     """
@@ -51,8 +51,9 @@ class StrategyConfigItem(BaseModel):
     class_name: str = Field(..., alias='class', min_length=1) # 'class' is a reserved keyword
     symbols: List[str] = Field(..., min_items=1)
     timeframe: str = Field(..., min_length=1) # Could add regex validation for timeframe format
-    params: Optional[StrategyParams] = Field(default_factory=StrategyParams) # Use StrategyParams model
+    params: Optional[StrategyParams] = Field(default_factory=StrategyParams)
     risk_params: Optional[StrategySpecificRiskParams] = Field(default_factory=StrategySpecificRiskParams)
+    on_stream_failure_action: Literal['stop_strategy', 'log_only', 'stop_engine'] = "stop_strategy"
 
     @validator('symbols', each_item=True)
     def check_symbol_format(cls, v):

@@ -9,10 +9,12 @@ risk_management:
     DEFAULT: 1000   # A global default for any other symbol not explicitly listed
   max_capital_per_order_ratio: 0.02 # Global default: 2% of available balance per order
   min_order_value: 10.0             # Global default: 10 USDT
+  # max_realized_drawdown_percent: 0.20 # Example: Global 20% drawdown limit
+  # max_realized_drawdown_absolute: 1000  # Example: Global 1000 USDT absolute drawdown
 
 # Strategy Configurations
 strategies:
-  - name: "SMABtc1m_ConservativeRisk"
+  - name: "SMABtc1m_ConservativeRisk_LogOnly"
     module: "strategies.simple_sma_strategy"
     class: "SimpleSMAStrategy"
     symbols: ["BTC/USDT"]
@@ -22,21 +24,15 @@ strategies:
       long_sma_period: 20
       subscribe_trades: true
       subscribe_ticker: true
-    risk_params: # Strategy-specific risk settings, overrides global for this strategy
+    risk_params:
       max_position_per_symbol:
-        BTC/USDT: 0.01  # More conservative BTC limit for this strategy
-      max_capital_per_order_ratio: 0.01 # Use only 1% of balance per order
-      min_order_value: 12.0 # Higher min order value for this strategy
-      # Note: If a key like 'max_position_per_symbol' is present here,
-      # it completely REPLACES the global 'max_position_per_symbol' dict for this strategy's checks.
-      # It does not merge them. If you want this strategy to also have an ETH limit, add it here.
-      # If a symbol (e.g. ETH/USDT) is not in this strategy-specific map,
-      # BasicRiskManager will NOT fall back to the global map for that specific symbol's position limit.
-      # It will effectively have no position limit from this rule unless you define a DEFAULT here too.
-      # This behavior might need refinement in BasicRiskManager for more intuitive merging/fallback.
-      # For now, be explicit in strategy_specific_params if you define max_position_per_symbol.
+        BTC/USDT: 0.01
+      max_capital_per_order_ratio: 0.01
+      min_order_value: 12.0
+      # max_realized_drawdown_percent: 0.05 # Strategy specific stricter drawdown
+    on_stream_failure_action: "log_only" # This strategy will only log if its stream fails
 
-  - name: "SMAEth5m_GlobalRisk"
+  - name: "SMAEth5m_GlobalRisk_StopStrat"
     module: "strategies.simple_sma_strategy"
     class: "SimpleSMAStrategy"
     symbols: ["ETH/USDT"]
@@ -44,45 +40,39 @@ strategies:
     params:
       short_sma_period: 5
       long_sma_period: 12
-      # This strategy does not define 'risk_params', so it will use the
-      # global settings from the 'risk_management' section above.
-      # e.g., max_position_per_symbol for ETH/USDT will be 0.5 from global.
-      # max_capital_per_order_ratio will be 0.02 from global.
+    # No risk_params, uses global.
+    # No on_stream_failure_action, uses default 'stop_strategy' from Pydantic model.
 
-  # Example of a strategy that might use a different set of symbols and
-  # falls back to the global DEFAULT for max_position_per_symbol for LTC/USDT
-  # if LTC/USDT is not in its own risk_params.max_position_per_symbol
-  # (Assuming BasicRiskManager is updated to handle DEFAULT fallback more gracefully)
-  - name: "SMALtc15m_MixedRisk"
+  - name: "SMALtc15m_StopEngineOnOrderStreamFail" # Example, not fully implemented for non-order streams
     module: "strategies.simple_sma_strategy"
     class: "SimpleSMAStrategy"
-    symbols: ["LTC/USDT"]
+    symbols: ["LTC/USDT"] # This specific data stream failure won't stop engine
     timeframe: "15m"
     params:
       short_sma_period: 8
       long_sma_period: 21
       subscribe_ticker: true
     risk_params:
-      # Only overrides max_capital_per_order_ratio for this strategy.
-      # max_position_per_symbol for LTC/USDT would come from global (1.0).
-      # min_order_value would come from global (10.0).
       max_capital_per_order_ratio: 0.03
+    # on_stream_failure_action: "stop_engine" # If this was an order stream, this would be critical.
+    # For a data stream, 'stop_engine' might be too drastic unless it's a very critical symbol.
+    # The engine currently stops all strategies if the *global order stream* fails and this is set.
+    # For individual data streams, 'stop_engine' will likely behave like 'stop_strategy'.
 
-  # Configuration for MyConfigurableDemoStrategy (if it's in main.py and main is importable)
-  # Or, more typically, this class would be in the 'strategies' directory.
-  # module: "main" or "strategies.my_configurable_demo_strategy"
-  # class: "MyConfigurableDemoStrategy"
-  # - name: "DemoMainStrategyWithRisk"
-  #   module: "__main__" # This might work if main.py is the entry point and class is global
-  #   class: "MyConfigurableDemoStrategy" # Assuming MyConfigurableDemoStrategy is defined in main.py
-  #   symbols: ["BTC/USDT"]
-  #   timeframe: "1m"
+  # Example using AllStreamsDemoStrategy if it's moved to strategies directory
+  # - name: "DemoAllStreams"
+  #   module: "strategies.all_streams_demo_strategy"
+  #   class: "AllStreamsDemoStrategy"
+  #   symbols: ["ADA/USDT"]
+  #   timeframe: "1m" # For OHLCV
   #   params:
-  #     max_orders_to_place: 2
-  #     trade_interval_bars: 2
-  #     order_amount: 0.00002
-  #     price_offset_factor: 0.95
   #     subscribe_trades: true
+  #     subscribe_ticker: true
+  #     max_orders_to_place: 1 # Example param for the demo strategy
+  #     trade_interval_bars: 3
+  #     order_amount: 0.1 # ADA is cheaper
+  #     price_offset_factor: 0.95
   #   risk_params:
-  #     min_order_value: 5.0 # Specific min value for this demo strategy
+  #     min_order_value: 1.0 # ADA min order value might be lower
+  #   on_stream_failure_action: "stop_strategy" # Default behavior
 yaml
