@@ -1,0 +1,43 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "crypto-quant-framework"
+version = "0.1.0-alpha"
+description = "A modular, event-driven framework for quantitative trading of cryptocurrencies."
+readme = "README.md"
+requires-python = ">=3.9"
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "License :: OSI Approved :: MIT License", # Or your preferred license
+    "Operating System :: OS Independent",
+    "Intended Audience :: Developers",
+    "Topic :: Office/Business :: Financial :: Investment",
+]
+
+# Core dependencies
+dependencies = [
+    "pandas>=2.0.0",
+    "pydantic>=2.0.0",
+    "pyyaml>=6.0",
+    "ccxt>=4.0.0", # Adding ccxt/ccxtpro as they are core
+    "ccxt-pro>=1.0.0" # Using ccxt-pro alias
+]
+
+[project.urls]
+"Homepage" = "https://github.com/your-username/crypto-quant-framework" # Replace with your repo URL
+"Bug Tracker" = "https://github.com/your-username/crypto-quant-framework/issues"
+
+[tool.setuptools.packages.find]
+where = ["src"] # Look for packages in the src directory
+
+# Optional: Configuration for tools like pytest, mypy, ruff can be added here later
+# [tool.pytest.ini_options]
+# ...
+
+# [tool.mypy]
+# ...
+
+# [tool.ruff]
+# ...

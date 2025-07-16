@@ -1,0 +1,78 @@
+# Global Risk Management Configuration
+# These parameters will be used by the BasicRiskManager as defaults
+# if not overridden by strategy-specific risk_params.
+risk_management:
+  max_position_per_symbol:
+    BTC/USDT: 0.05  # Global default: Max 0.05 BTC
+    ETH/USDT: 0.5   # Global default: Max 0.5 ETH
+    LTC/USDT: 1.0   # Global default: Max 1.0 LTC
+    DEFAULT: 1000   # A global default for any other symbol not explicitly listed
+  max_capital_per_order_ratio: 0.02 # Global default: 2% of available balance per order
+  min_order_value: 10.0             # Global default: 10 USDT
+  # max_realized_drawdown_percent: 0.20 # Example: Global 20% drawdown limit
+  # max_realized_drawdown_absolute: 1000  # Example: Global 1000 USDT absolute drawdown
+
+# Strategy Configurations
+strategies:
+  - name: "SMABtc1m_ConservativeRisk_LogOnly"
+    module: "strategies.simple_sma_strategy"
+    class: "SimpleSMAStrategy"
+    symbols: ["BTC/USDT"]
+    timeframe: "1m"
+    params:
+      short_sma_period: 10
+      long_sma_period: 20
+      subscribe_trades: true
+      subscribe_ticker: true
+    risk_params:
+      max_position_per_symbol:
+        BTC/USDT: 0.01
+      max_capital_per_order_ratio: 0.01
+      min_order_value: 12.0
+      # max_realized_drawdown_percent: 0.05 # Strategy specific stricter drawdown
+    on_stream_failure_action: "log_only" # This strategy will only log if its stream fails
+
+  - name: "SMAEth5m_GlobalRisk_StopStrat"
+    module: "strategies.simple_sma_strategy"
+    class: "SimpleSMAStrategy"
+    symbols: ["ETH/USDT"]
+    timeframe: "5m"
+    params:
+      short_sma_period: 5
+      long_sma_period: 12
+    # No risk_params, uses global.
+    # No on_stream_failure_action, uses default 'stop_strategy' from Pydantic model.
+
+  - name: "SMALtc15m_StopEngineOnOrderStreamFail" # Example, not fully implemented for non-order streams
+    module: "strategies.simple_sma_strategy"
+    class: "SimpleSMAStrategy"
+    symbols: ["LTC/USDT"] # This specific data stream failure won't stop engine
+    timeframe: "15m"
+    params:
+      short_sma_period: 8
+      long_sma_period: 21
+      subscribe_ticker: true
+    risk_params:
+      max_capital_per_order_ratio: 0.03
+    # on_stream_failure_action: "stop_engine" # If this was an order stream, this would be critical.
+    # For a data stream, 'stop_engine' might be too drastic unless it's a very critical symbol.
+    # The engine currently stops all strategies if the *global order stream* fails and this is set.
+    # For individual data streams, 'stop_engine' will likely behave like 'stop_strategy'.
+
+  # Example using AllStreamsDemoStrategy if it's moved to strategies directory
+  # - name: "DemoAllStreams"
+  #   module: "strategies.all_streams_demo_strategy"
+  #   class: "AllStreamsDemoStrategy"
+  #   symbols: ["ADA/USDT"]
+  #   timeframe: "1m" # For OHLCV
+  #   params:
+  #     subscribe_trades: true
+  #     subscribe_ticker: true
+  #     max_orders_to_place: 1 # Example param for the demo strategy
+  #     trade_interval_bars: 3
+  #     order_amount: 0.1 # ADA is cheaper
+  #     price_offset_factor: 0.95
+  #   risk_params:
+  #     min_order_value: 1.0 # ADA min order value might be lower
+  #   on_stream_failure_action: "stop_strategy" # Default behavior
+yaml
